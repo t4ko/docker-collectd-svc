@@ -1,1 +1,1 @@
-# collectd_svc
+# docker-collectd-svc
