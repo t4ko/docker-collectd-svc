@@ -7,7 +7,7 @@ FROM ubuntu:16.04
 ENV DEBIAN_FRONTEND noninteractive 
 
 # Install all prerequisites for building collectd 
-RUN apt-get -y update && apt-get -y install wget build-essential 
+RUN apt-get -y update && apt-get -y install wget build-essential ssh
 
 # Install all dependencies for collectd plugins. Here we want collectd-snmp 
 RUN apt-get -y install libsnmp-dev libperl-dev python3-dev python3-scp
