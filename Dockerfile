@@ -10,7 +10,8 @@ ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get -y update && apt-get -y install wget build-essential ssh
 
 # Install all dependencies for collectd plugins. Here we want collectd-snmp 
-RUN apt-get -y install libsnmp-dev libperl-dev python3-dev python-pip
+RUN apt-get -y install libsnmp-dev libperl-dev python3-dev 
+RUN apt-get -y install python-pip
 RUN pip install paramiko
 
 # Get and untar sources files 
