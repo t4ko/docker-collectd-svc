@@ -8,4 +8,4 @@ if [ ! -e "/.initialized" ]; then
     envtpl /etc/collectd/collectd.conf.tpl
 fi
 
-# exec collectd -f
+exec collectd -f
