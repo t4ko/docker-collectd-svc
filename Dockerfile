@@ -24,7 +24,7 @@ RUN apt-get purge
 # Deploy collectd plugin and config template
 ADD collectd-plugin/base.py /opt/collectd/lib/collectd/plugins/
 ADD collectd-plugin/svc_plugin.py /opt/collectd/lib/collectd/plugins/
-ADD collectd.conf.tpl /etc/collectd/collectd.conf.tpl
+ADD collectd.conf.tpl /opt/collectd/etc/collectd.conf.tpl
 
 ADD ./run.sh /run.sh
 ENTRYPOINT ["/run.sh"]
