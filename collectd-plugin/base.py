@@ -122,8 +122,11 @@ class Base(object):
         try:
             start = datetime.datetime.now()
             stats = self.get_stats()
-            self.logverbose("collectd new data from service :: took %d seconds"
-                    % (datetime.datetime.now() - start).seconds)
+            vdisksStatsCount = len(stats["{}.vdsk".format(self.cluster)])
+            mdisksStatsCount = len(stats["{}.mdsk".format(self.cluster)])
+            nodesStatsCount = len(stats["{}.node".format(self.cluster)])
+            collectd.info("%s : %d vdisks metrics : %d mdisks metrics : %d nodes metrics :: took %d seconds"
+                    % (self.cluster, vdisksStatsCount, mdisksStatsCount, nodesStatsCount, (datetime.datetime.now() - start).seconds))
         except Exception as exc:
             collectd.error("%s: failed to get stats :: %s :: %s"
                     % (self.prefix, exc, traceback.format_exc()))
