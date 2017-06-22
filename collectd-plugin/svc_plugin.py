@@ -149,39 +149,34 @@ class SVCPlugin(base.Base):
 
         #Get the time at which all nodes made their iostats dump 
         (stdin, stdout, stderr) = ssh.exec_command('lsdumps -prefix /dumps/iostats/')
-        firstNode = ''
-        firstNodeTime = ''
-        lastCompleteTime = ''
-        lastCompleteDay = ''
-        
-
+        timestamps = {}
         lsdumpsList = set()
-        dateObtained, dateComplete = False, False
         dumpCount = len(nodeList) * 4
         for line in reversed(list(stdout)):
             if 'id  filename' not in line:
                 lsdumpsList.add(line[4:-2])
                 junk1, junk2, node, day, minute = line[:-2].split('_')
-                if (not dateObtained) and (not dateComplete):
-                    dateObtained = True
-                    lastCompleteDay = day
-                    lastCompleteTime = minute
-                if dateObtained and (not dateComplete):
-                    if (day==lastCompleteDay) and (minute==lastCompleteTime):
-                        dumpCount = dumpCount - 1
-                        if dumpCount <= 0:
-                            dateComplete = True
-                    else:
-                        dateObtained = False
-                        dumpCount = len(nodeList) * 4 - 1
+                timeString = "{0}_{1}".format(day, minute)
+                epoch = time.mktime(time.strptime(timeString, "%y%m%d_%H%M%S"))
+                if epoch in timestamps:
+                    timestamps[epoch]['counter'] = timestamps[epoch]['counter'] + 1
+                else:
+                    timestamps[epoch] = {
+                        'string' : timeString,
+                        'counter' : 1
+                    }
+        for epoch in sorted(timestamps.keys(), reverse=True):
+            if timestamps[epoch]['counter'] == dumpCount :
+                self.time = epoch
+                break
+
         ssh.close(); # We don't need the ssh connection anymore
 
         print("Finish get last time and dump list {0}".format(time.clock()))
 
         # Compute old timestamp
-        newTimeString = "{0}_{1}".format(lastCompleteDay, lastCompleteTime)
-        oldEpoch = time.mktime(time.strptime(newTimeString, "%y%m%d_%H%M%S")) - int(self.interval) 
-        self.time = oldEpoch + int(self.interval)
+        newTimeString = timestamps[epoch]['string']
+        oldEpoch = self.time - int(self.interval) 
         oldTimeString = time.strftime("%y%m%d_%H%M%S", time.localtime(oldEpoch))
 
         # Create the dumps directory if it does not exist yet
@@ -231,12 +226,12 @@ class SVCPlugin(base.Base):
 
         # Download the stats files from /dumps/iostats/ on svc and parse the xml
         stats = defaultdict(dict)
-        command = "scp -i {0} -o StrictHostKeyChecking=no -q '{1}@{2}:/dumps/iostats/*{3}_{4}' {5}".format(self.sshRSAkey, self.sshUser, self.sshAdress, lastCompleteDay, lastCompleteTime, dumpsFolder)
+        command = "scp -i {0} -o StrictHostKeyChecking=no -q '{1}@{2}:/dumps/iostats/*{3}' {4}".format(self.sshRSAkey, self.sshUser, self.sshAdress, newTimeString, dumpsFolder)
         subprocess.check_call(command, shell=True)
         self.logdebug("Stats dumps directory contains : {}".format(str(os.listdir(dumpsFolder))))
         for nodeId in nodeList:
             for statType in ['Nn', 'Nv', 'Nm']:
-                filename = '{0}_stats_{1}_{2}_{3}'.format(statType, nodeId, lastCompleteDay, lastCompleteTime)
+                filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
                 stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
             stats[nodeId]['sysid'] = stats[nodeId]['Nn'].get('id')
         print("finish dl and parsing new files {0}".format(time.clock()))
