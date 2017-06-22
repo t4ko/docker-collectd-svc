@@ -46,6 +46,10 @@ class Base(object):
         self.sshRSAkey = ''
         self.interval = 60.0
         self.cluster_handle = None
+        self.time = 0
+        self.vdisksStatsCount = 0
+        self.mdisksStatsCount = 0
+        self.nodesStatsCount = 0
 
     def config_callback(self, conf):
         """Takes a collectd conf object and fills in the local config."""
@@ -114,23 +118,30 @@ class Base(object):
             val.type_instance=type
         val.values=[value]
         val.interval = self.interval
-        val.dispatch()
+        val.dispatch(time=self.time)
+        if "node" in plugin:
+            self.nodesStatsCount += 1
+        elif "mdsk" in plugin:
+            self.mdisksStatsCount += 1
+        elif "vdsk" in plugin:
+            self.vdisksStatsCount +=1
         self.logdebug("sent metric %s.%s.%s.%s.%s"
                 % (plugin, plugin_instance, type, type_instance, value))
 
     def read_callback(self):
+        self.vdisksStatsCount = 0
+        self.mdisksStatsCount = 0
+        self.nodesStatsCount = 0
         try:
             start = datetime.datetime.now()
             stats = self.get_stats()
-            vdisksStatsCount = len(stats["{}.vdsk".format(self.cluster)])
-            mdisksStatsCount = len(stats["{}.mdsk".format(self.cluster)])
-            nodesStatsCount = len(stats["{}.node".format(self.cluster)])
-            collectd.info("%s : %d vdisks metrics : %d mdisks metrics : %d nodes metrics :: took %d seconds"
-                    % (self.cluster, vdisksStatsCount, mdisksStatsCount, nodesStatsCount, (datetime.datetime.now() - start).seconds))
+            self.dispatch(stats)
+            if stats is not None:
+                collectd.info("%s : %d vdisks metrics : %d mdisks metrics : %d nodes metrics :: took %d seconds"
+                        % (self.cluster, self.vdisksStatsCount, self.mdisksStatsCount, self.nodesStatsCount, (datetime.datetime.now() - start).seconds))
         except Exception as exc:
             collectd.error("%s: failed to get stats :: %s :: %s"
                     % (self.prefix, exc, traceback.format_exc()))
-        self.dispatch(stats)
 
     def get_stats(self):
         collectd.error('Not implemented, should be subclassed')

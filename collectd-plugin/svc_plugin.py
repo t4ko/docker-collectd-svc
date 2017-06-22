@@ -64,37 +64,124 @@ class SVCPlugin(base.Base):
         ssh.connect(self.sshAdress, username=self.sshUser, key_filename=self.sshRSAkey)
         
 
-        # Get the node list and the time at which all nodes made their iostats dump 
+        # Load the node list
+        (stdin, stdout, stderr) = ssh.exec_command('lsnode -delim :')
+        nodeList = set()
+        firstLine = True
+        enclosure_id_index = 12
+        for line in list(stdout):
+            if firstLine:
+                firstLine = False
+                headers = line.split(':')
+                enclosure_id_index = headers.index('enclosure_id')
+                continue
+            nodeInfo = line.split(':')
+            nodeList.add(nodeInfo[enclosure_id_index])
+
+        # Load the vdisk and their mdisk group
+        vdiskList = {}
+        (stdin_vdsk, stdout_vdsk, stderr_vdsk) = ssh.exec_command('lsvdisk -delim :')
+        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
+        for line in stdout_vdsk:
+            splittedLine = line.split(':')
+            if isFirst:
+                isFirst = False
+                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
+                continue
+            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
+                sys.exit('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+            vdiskList[splittedLine[nameIndex]] = { 
+                'mdiskGrpName' : '', 
+                'ro' : 0, 
+                'wo' : 0, 
+                'rrp' : 0, 
+                'wrp' : 0 
+            }
+            if splittedLine[mdisk_grp_nameIndex] == 'many': # the vdisk is in several mdisk groups
+                (stdin_details, stdout_details, stderr_details) = ssh.exec_command('lsvdisk -delim : {}'.format(splittedLine[nameIndex]))
+                for line_details in stdout_details:
+                    if 'mdisk_grp_name' in line_details and not 'many' in line_details:
+                        detailArray = line_details.split(':')
+                        vdiskList[splittedLine[nameIndex]]['mdiskGrpName'] = detailArray[1].replace('\n', '')
+                        break
+            else: # the vdisk is in a single mdisk group
+                vdiskList[splittedLine[nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
+
+        # Load the MdiskGrp names and their Mdisk from the svc cluster
+        mdiskGrpList = { }
+        mdiskList = { }
+        (stdin_mdsk, stdout_mdsk, stderr_mdsk) = ssh.exec_command('lsmdisk -delim :')
+        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
+        for line in stdout_mdsk:
+            splittedLine = line.split(':')
+            if isFirst:
+                isFirst = False
+                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
+                continue
+            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
+                collectd.info('The first line of the output for \'lsmdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+            mdiskList[splittedLine[nameIndex]] = { 
+                'mdiskGrpName' : splittedLine[mdisk_grp_nameIndex], 
+                'ro' : 0, 
+                'wo' : 0, 
+                'rrp' : 0, 
+                'wrp' : 0 
+            }
+            mdiskGrpList[splittedLine[mdisk_grp_nameIndex]] = {
+                'ro' : 0, 
+                'wo' : 0, 
+                'rrp' : 0, 
+                'wrp' : 0,
+                'b_ro' : 0,
+                'b_wo' : 0,
+                'b_rrp': 0,
+                'b_wrp': 0
+            }
+
+
+
+
+
+
+
+
+
+
+        #Get the time at which all nodes made their iostats dump 
         (stdin, stdout, stderr) = ssh.exec_command('lsdumps -prefix /dumps/iostats/')
         firstNode = ''
         firstNodeTime = ''
         lastCompleteTime = ''
         lastCompleteDay = ''
-        nodeList = set()
+        
+
         lsdumpsList = set()
-        dateObtained = 0
+        dateObtained, dateComplete = False, False
+        dumpCount = len(nodeList) * 4
         for line in reversed(list(stdout)):
             if 'id  filename' not in line:
                 lsdumpsList.add(line[4:-2])
                 junk1, junk2, node, day, minute = line[:-2].split('_')
-                if dateObtained == 0:
-                    if firstNode == '':
-                        firstNode = node
-                        firstNodeTime = minute
-                        lastCompleteTime = minute
-                        lastCompleteDay = day
-                    if node == firstNode and minute != firstNodeTime:
-                        dateObtained = 1
-                    if node != firstNode and minute != firstNodeTime:
-                        lastCompleteTime = minute
-                        lastCompleteDay = day
-                        dateObtained = 1
-                    if node not in nodeList:
-                        nodeList.add(node)
+                if (not dateObtained) and (not dateComplete):
+                    dateObtained = True
+                    lastCompleteDay = day
+                    lastCompleteTime = minute
+                if dateObtained and (not dateComplete):
+                    if (day==lastCompleteDay) and (minute==lastCompleteTime):
+                        dumpCount = dumpCount - 1
+                        if dumpCount <= 0:
+                            dateComplete = True
+                    else:
+                        dateObtained = False
+                        dumpCount = len(nodeList) * 4 - 1
+        ssh.close(); # We don't need the ssh connection anymore
+
         print("Finish get last time and dump list {0}".format(time.clock()))
 
         # Compute old timestamp
-        oldEpoch = time.mktime(time.strptime("{0}{1}".format(lastCompleteDay, lastCompleteTime[:]), "%y%m%d%H%M%S")) - int(self.interval) 
+        newTimeString = "{0}_{1}".format(lastCompleteDay, lastCompleteTime)
+        oldEpoch = time.mktime(time.strptime(newTimeString, "%y%m%d_%H%M%S")) - int(self.interval) 
+        self.time = oldEpoch + int(self.interval)
         oldTimeString = time.strftime("%y%m%d_%H%M%S", time.localtime(oldEpoch))
 
         # Create the dumps directory if it does not exist yet
@@ -102,8 +189,14 @@ class SVCPlugin(base.Base):
         if not os.path.exists(dumpsFolder):
             os.makedirs(dumpsFolder)
 
-        # Get the list of file currently in the directory
+        # Check if the last available dumps have not already been collected
         dumpsList = os.listdir(dumpsFolder)
+        for dumpName in dumpsList:
+            if newTimeString in dumpName:
+                collectd.info("New stats dumps are not yet available")
+                return
+
+        # Check if files from previous stats are already in the directory
         useOld = 1
         oldDumpsList = set()
         for nodeId in nodeList:
@@ -153,75 +246,6 @@ class SVCPlugin(base.Base):
             os.remove('{0}/{1}'.format(dumpsFolder, filename))
 
 
-
-
-
-
-
-
-
-
-        # Load the MdiskGrp names and their Mdisk from the svc cluster if needed
-        mdiskGrpList = { }
-        mdiskList = { }
-        (stdin_mdsk, stdout_mdsk, stderr_mdsk) = ssh.exec_command('lsmdisk -delim :')
-        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
-        for line in stdout_mdsk:
-            splittedLine = line.split(':')
-            if isFirst:
-                isFirst = False
-                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
-                continue
-            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
-                sys.exit('The first line of the output for \'lsmdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
-            mdiskList[splittedLine[nameIndex]] = { 
-                'mdiskGrpName' : splittedLine[mdisk_grp_nameIndex], 
-                'ro' : 0, 
-                'wo' : 0, 
-                'rrp' : 0, 
-                'wrp' : 0 
-            }
-            mdiskGrpList[splittedLine[mdisk_grp_nameIndex]] = {
-                'ro' : 0, 
-                'wo' : 0, 
-                'rrp' : 0, 
-                'wrp' : 0,
-                'b_ro' : 0,
-                'b_wo' : 0,
-                'b_rrp': 0,
-                'b_wrp': 0
-            }
-
-
-        # Load the vdisk and their mdisk group
-        vdiskList = {}
-        (stdin_vdsk, stdout_vdsk, stderr_vdsk) = ssh.exec_command('lsvdisk -delim :')
-        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
-        for line in stdout_vdsk:
-            splittedLine = line.split(':')
-            if isFirst:
-                isFirst = False
-                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
-                continue
-            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
-                sys.exit('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
-            vdiskList[splittedLine[nameIndex]] = { 
-                'mdiskGrpName' : '', 
-                'ro' : 0, 
-                'wo' : 0, 
-                'rrp' : 0, 
-                'wrp' : 0 
-            }
-            
-            if splittedLine[mdisk_grp_nameIndex] == 'many':
-                (stdin_details, stdout_details, stderr_details) = ssh.exec_command('lsvdisk -delim : {}'.format(splittedLine[nameIndex]))
-                for line_details in stdout_details:
-                    if 'mdisk_grp_name' in line_details and not 'many' in line_details:
-                        detailArray = line_details.split(':')
-                        vdiskList[splittedLine[nameIndex]]['mdiskGrpName'] = detailArray[1].replace('\n', '')
-                        break
-            else:
-                vdiskList[splittedLine[nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
 
 
 
@@ -508,7 +532,6 @@ class SVCPlugin(base.Base):
 
 
 
-        ssh.close()
         return data
 
 try:
