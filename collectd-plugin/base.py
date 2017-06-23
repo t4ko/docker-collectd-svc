@@ -30,6 +30,7 @@
 import collectd
 import signal
 import datetime
+import time
 import traceback
 import subprocess
 
@@ -148,11 +149,11 @@ class Base(object):
 
     def logverbose(self, msg):
         if self.verbose:
-            collectd.info("%s: %s" % (self.prefix, msg))
+            collectd.info("%s: %d : %s" % (self.prefix, time.time(), msg))
 
     def logdebug(self, msg):
         if self.debug:
-            collectd.info("%s: %s" % (self.prefix, msg))
+            collectd.info("%s: %d : %s" % (self.prefix, time.time(), msg))
 
     @staticmethod
     def reset_sigchld():
