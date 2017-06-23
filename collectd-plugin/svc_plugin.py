@@ -35,6 +35,7 @@ import re
 import traceback
 import random
 import paramiko
+from scp import SCPClient
 import os
 import time
 import subprocess
@@ -170,7 +171,7 @@ class SVCPlugin(base.Base):
                 self.time = epoch
                 break
 
-        ssh.close(); # We don't need the ssh connection anymore
+        #ssh.close(); # We don't need the ssh connection anymore
 
         print("Finish get last time and dump list {0}".format(time.clock()))
 
@@ -201,17 +202,33 @@ class SVCPlugin(base.Base):
                 if oldFileName not in dumpsList:
                     useOld = 0
 
-        # Download the previous file from the SVC cluster if they are available
-        if useOld == 0:
-            useOld = 1
-            for oldFileName in oldDumpsList:
-                if oldFileName not in lsdumpsList:
-                    useOld = 0
-            if useOld == 1:
-                command = "scp -i {0} -o StrictHostKeyChecking=no -q '{1}@{2}:/dumps/iostats/*{3}' {4}".format(self.sshRSAkey, self.sshUser, self.sshAdress, oldTimeString, dumpsFolder)
-                subprocess.check_call(command, shell=True)
+        # Download the file from the SVC cluster if they are available
+        # command = "scp -i {0} -o StrictHostKeyChecking=no -q '{1}@{2}:/dumps/iostats/*{3}' {4}".format(self.sshRSAkey, self.sshUser, self.sshAdress, newTimeString, dumpsFolder)
+        # if useOld == 0:
+        #     useOld = 1
+        #     for oldFileName in oldDumpsList:
+        #         if oldFileName not in lsdumpsList:
+        #             useOld = 0
+        #     if useOld == 1:
+        #         command = "scp -i {0} -o StrictHostKeyChecking=no -q '{1}@{2}:/dumps/iostats/*{3}' '{1}@{2}:/dumps/iostats/*{4}' {5}".format(self.sshRSAkey, self.sshUser, self.sshAdress, oldTimeString, newTimeString, dumpsFolder)
+        
 
-        print("Finish dl oldfiles {0}".format(time.clock()))
+
+        t = ssh.get_transport()
+        scp = SCPClient(t, socket_timeout=30.0)
+        scp.get("/dumps/iostats/*{}".format(newTimeString), dumpsFolder)
+        ssh.close()
+        #subprocess.check_call(command, shell=True)
+
+        # Load and parse the current files 
+        stats = defaultdict(dict)
+        self.logdebug("Stats dumps directory contains : {}".format(str(os.listdir(dumpsFolder))))
+        for nodeId in nodeList:
+            for statType in ['Nn', 'Nv', 'Nm']:
+                filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
+                stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+            stats[nodeId]['sysid'] = stats[nodeId]['Nn'].get('id')
+        print("finish dl and parsing new files {0}".format(time.clock()))
 
         # Load and parse previous files if they are available
         if useOld == 1:
@@ -223,18 +240,6 @@ class SVCPlugin(base.Base):
                 old_stats[nodeId]['sysid'] = old_stats[nodeId]['Nn'].get('id')
 
         print("Finished parsing old files {0}".format(time.clock()))
-
-        # Download the stats files from /dumps/iostats/ on svc and parse the xml
-        stats = defaultdict(dict)
-        command = "scp -i {0} -o StrictHostKeyChecking=no -q '{1}@{2}:/dumps/iostats/*{3}' {4}".format(self.sshRSAkey, self.sshUser, self.sshAdress, newTimeString, dumpsFolder)
-        subprocess.check_call(command, shell=True)
-        self.logdebug("Stats dumps directory contains : {}".format(str(os.listdir(dumpsFolder))))
-        for nodeId in nodeList:
-            for statType in ['Nn', 'Nv', 'Nm']:
-                filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
-                stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
-            stats[nodeId]['sysid'] = stats[nodeId]['Nn'].get('id')
-        print("finish dl and parsing new files {0}".format(time.clock()))
 
         # Remove old stats files
         for filename in dumpsList:
