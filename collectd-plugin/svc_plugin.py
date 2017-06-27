@@ -49,6 +49,7 @@ class SVCPlugin(base.Base):
     def __init__(self):
         base.Base.__init__(self)
         self.prefix = 'svc'
+        self.ssh = None
 
     def allowWildcards(self, s):
         """Return a shell-escaped version of the string `s`."""
@@ -60,12 +61,12 @@ class SVCPlugin(base.Base):
             return b""
         return s
 
-    def check_command(self, ssh_client, command, attempt=3):
+    def check_command(self, command, attempt=3):
         """Retry to send a command if the svc cluster can't answer, return false if all attempt failed"""
         commandSuccess = False
         originalAttempt = attempt
         while not commandSuccess and attempt > 0:
-            (stdin, stdout, stderr) = ssh_client.exec_command(command)
+            (stdin, stdout, stderr) = self.ssh.exec_command(command)
             commandSuccess = True
             for errLine in list(stderr):
                 self.logverbose("STDERR : {}".format(errLine))
@@ -77,6 +78,7 @@ class SVCPlugin(base.Base):
             time.sleep(1)
         if attempt <= 0 and not commandSuccess:
             collect.info("{} : Command {} failed {} times".format(str(int(time.time())), command, originalAttempt))
+            self.ssh.close()
         return commandSuccess, stdout
 
     def get_stats(self):
@@ -87,17 +89,23 @@ class SVCPlugin(base.Base):
         clustermdsk = "{}.mdsk".format(self.cluster)
         clustervdsk = "{}.vdsk".format(self.cluster)
 
+        # Close previous ssh connections if still alive
+        if self.ssh is not None:
+            transport = self.ssh.get_transport()
+            if transport and transport.is_active():
+                self.ssh.close()
+
         self.logverbose("Beginning collection stats")
         # Connect with ssh to svc
         self.logverbose("Connecting with ssh to the cluster")
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
-        ssh.connect(self.sshAdress, username=self.sshUser, key_filename=self.sshRSAkey, compress=True)
+        self.ssh = paramiko.SSHClient()
+        self.ssh.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
+        self.ssh.connect(self.sshAdress, username=self.sshUser, key_filename=self.sshRSAkey, compress=True)
         self.logverbose("Successfuly connected with ssh")
 
         # Load the node list
         self.logverbose("Loading the node list")
-        (success, stdout) = self.check_command(ssh, 'lsnode -delim :')
+        (success, stdout) = self.check_command('lsnode -delim :')
         if not success: return
         nodeList = set()
         firstLine = True
@@ -118,7 +126,7 @@ class SVCPlugin(base.Base):
         self.logverbose("Loading the vdisk list")
         vdiskList = {}
         manyMdiskgrp = set()
-        (success, stdout_vdsk) = self.check_command(ssh, 'lsvdisk -delim :')
+        (success, stdout_vdsk) = self.check_command('lsvdisk -delim :')
         if not success: return
         isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
         for line in stdout_vdsk:
@@ -129,6 +137,7 @@ class SVCPlugin(base.Base):
                 continue
             if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
                 collectd.info('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+                self.ssh.close()
                 return
             vdiskList[splittedLine[nameIndex]] = { 
                 'mdiskGrpName' : '', 
@@ -143,7 +152,7 @@ class SVCPlugin(base.Base):
                 vdiskList[splittedLine[nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
 
         if(len(manyMdiskgrp) > 0):
-            (success, stdout_details) = self.check_command(ssh, 'lsvdiskcopy -delim :')
+            (success, stdout_details) = self.check_command('lsvdiskcopy -delim :')
             if not success: return
             self.logverbose("{} vdisks on many mdiskGrp, loading details from lsvdiskcopy".format(len(manyMdiskgrp)))
             isFirst, vdisk_nameIndex, mdisk_grp_nameIndex = True, -1, -1
@@ -155,6 +164,7 @@ class SVCPlugin(base.Base):
                     continue
                 if vdisk_nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
                     collectd.info('The first line of the output for \'lsvdiskcopy -delim :\' is missing \'vdisk_name\' or \'mdisk_grp_name\'')
+                    self.ssh.close()
                     return
                 if splittedLine[vdisk_nameIndex] in manyMdiskgrp and vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] == '':
                     vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
@@ -164,7 +174,7 @@ class SVCPlugin(base.Base):
         self.logverbose("Loading the mdisk list")
         mdiskGrpList = { }
         mdiskList = { }
-        (success, stdout_mdsk) = self.check_command(ssh, 'lsmdisk -delim :')
+        (success, stdout_mdsk) = self.check_command('lsmdisk -delim :')
         if not success: return
         isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
         for line in stdout_mdsk:
@@ -175,6 +185,8 @@ class SVCPlugin(base.Base):
                 continue
             if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
                 collectd.info('The first line of the output for \'lsmdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+                self.ssh.close()
+                return
             mdiskList[splittedLine[nameIndex]] = { 
                 'mdiskGrpName' : splittedLine[mdisk_grp_nameIndex], 
                 'ro' : 0, 
@@ -205,7 +217,7 @@ class SVCPlugin(base.Base):
 
         #Get the time at which all nodes made their iostats dump 
         self.logverbose("Searching the time at which all dumps are available")
-        (success, stdout) = self.check_command(ssh, 'lsdumps -prefix /dumps/iostats/')
+        (success, stdout) = self.check_command('lsdumps -prefix /dumps/iostats/')
         if not success: return
         timestamps = {}
         lsdumpsList = set()
@@ -249,6 +261,7 @@ class SVCPlugin(base.Base):
         for dumpName in dumpsList:
             if newTimeString in dumpName:
                 collectd.info("New stats dumps are not yet available")
+                self.ssh.close()
                 return
 
         # Check if files from previous stats are already in the directory
@@ -264,10 +277,10 @@ class SVCPlugin(base.Base):
 
         # Download the file from the SVC cluster if they are available
         self.logverbose("Downloading the dumps with scp")
-        t = ssh.get_transport()
+        t = self.ssh.get_transport()
         scp = SCPClient(t, socket_timeout=30.0, sanitize=self.allowWildcards)
 
-        # command = "scp -i {0} -o StrictHostKeyChecking=no -q '{1}@{2}:/dumps/iostats/*{3}' {4}".format(self.sshRSAkey, self.sshUser, self.sshAdress, newTimeString, dumpsFolder)
+
         if useOld == 0:
             useOld = 1
             for oldFileName in oldDumpsList:
@@ -277,12 +290,11 @@ class SVCPlugin(base.Base):
                 self.logverbose("Downloading old and new dumps")
                 self.logdebug("String passed to scp.get is : /dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString))
                 scp.get("/dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString), dumpsFolder)
-        #         command = "scp -i {0} -o StrictHostKeyChecking=no -q '{1}@{2}:/dumps/iostats/*{3}' '{1}@{2}:/dumps/iostats/*{4}' {5}".format(self.sshRSAkey, self.sshUser, self.sshAdress, oldTimeString, newTimeString, dumpsFolder)
         else:
             self.logverbose("Downloading new dumps")
             self.logdebug("String passed to scp.get is : /dumps/iostats/*{}".format(newTimeString))
             scp.get("/dumps/iostats/*{}".format(newTimeString), dumpsFolder)
-        ssh.close()
+        self.ssh.close()
 
         # Load and parse the current files 
         self.logverbose("Loading and parsing the last files")
@@ -309,16 +321,6 @@ class SVCPlugin(base.Base):
         # Remove old stats files
         for filename in dumpsList:
             os.remove('{0}/{1}'.format(dumpsFolder, filename))
-
-        # tempList = os.listdir(dumpsFolder)
-        # for filename in tempList:
-        #     os.remove('{0}/{1}'.format(dumpsFolder, filename))
-        # self.time = 0
-        # time.sleep(7)
-        # self.get_stats()
-        # return #REMOVE AFTER DEBUGGING
-
-
 
 
 
