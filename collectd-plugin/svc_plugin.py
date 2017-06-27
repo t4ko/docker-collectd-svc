@@ -266,6 +266,7 @@ class SVCPlugin(base.Base):
 
         # Check if files from previous stats are already in the directory
         useOld = 1
+        oldFileDownloaded, oldFileAvailable = True, True
         oldDumpsList = set()
         self.logdebug("Before doing anything the dumps folder contains :\n {}".format(str(dumpsList)))
         for nodeId in nodeList:
@@ -273,7 +274,7 @@ class SVCPlugin(base.Base):
                 oldFileName = "{0}_stats_{1}_{2}".format(statType, nodeId, oldTimeString)
                 oldDumpsList.add(oldFileName)
                 if oldFileName not in dumpsList:
-                    useOld = 0
+                    oldFileDownloaded = False
 
         # Download the file from the SVC cluster if they are available
         self.logverbose("Downloading the dumps with scp")
@@ -281,16 +282,16 @@ class SVCPlugin(base.Base):
         scp = SCPClient(t, socket_timeout=30.0, sanitize=self.allowWildcards)
 
 
-        if useOld == 0:
-            useOld = 1
+        if not oldFileDownloaded:
             for oldFileName in oldDumpsList:
                 if oldFileName not in lsdumpsList:
+                    oldFileAvailable = False
                     useOld = 0
-            if useOld == 1:
-                self.logverbose("Downloading old and new dumps")
-                self.logdebug("String passed to scp.get is : /dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString))
-                scp.get("/dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString), dumpsFolder)
-        else:
+        if not oldFileDownloaded and oldFileAvailable:
+            self.logverbose("Downloading old and new dumps")
+            self.logdebug("String passed to scp.get is : /dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString))
+            scp.get("/dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString), dumpsFolder)
+        elif oldFileDownloaded or not oldFileAvailable:
             self.logverbose("Downloading new dumps")
             self.logdebug("String passed to scp.get is : /dumps/iostats/*{}".format(newTimeString))
             scp.get("/dumps/iostats/*{}".format(newTimeString), dumpsFolder)
