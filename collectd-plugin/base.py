@@ -114,7 +114,7 @@ class Base(object):
         val.plugin=plugin
         val.plugin_instance=plugin_instance
         if type_instance is not None:
-            val.type_instance="%s-%s" % (type, type_instance)
+            val.type_instance=type_instance
         else:
             val.type_instance=type
         val.values=[value]
