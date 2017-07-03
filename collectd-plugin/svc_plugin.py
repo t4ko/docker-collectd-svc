@@ -57,7 +57,7 @@ class SVCPlugin(base.Base):
         if not s:
             return b""
         if _check_safe(s) is None:
-            collectd.info("File name does is not a dump file name")
+            collectd.info("File name is not a dump file name")
             return b""
         return s
 
@@ -77,8 +77,10 @@ class SVCPlugin(base.Base):
             attempt = attempt - 1 
             time.sleep(1)
         if attempt <= 0 and not commandSuccess:
-            collect.info("{} : Command {} failed {} times".format(str(int(time.time())), command, originalAttempt))
+            collectd.info("{} : Command {} failed {} times".format(str(int(time.time())), command, originalAttempt))
             self.ssh.close()
+        if attempt < originalAttempt and attempt > 0:
+            collectd.info("{} : Command {} succeeded after {} retry".format(str(int(time.time())), command, originalAttempt - attempt))
         return commandSuccess, stdout
 
     def get_stats(self):
@@ -90,18 +92,21 @@ class SVCPlugin(base.Base):
         clustervdsk = "{}.vdsk".format(self.cluster)
 
         # Close previous ssh connections if still alive
-        if self.ssh is not None:
+        if self.ssh is not None and self.forcedTime == 0:
             transport = self.ssh.get_transport()
             if transport and transport.is_active():
                 self.ssh.close()
 
-        self.logverbose("Beginning collection stats")
+        self.logverbose("Beginning stats collection")
         # Connect with ssh to svc
-        self.logverbose("Connecting with ssh to the cluster")
-        self.ssh = paramiko.SSHClient()
-        self.ssh.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
-        self.ssh.connect(self.sshAdress, username=self.sshUser, key_filename=self.sshRSAkey, compress=True)
-        self.logverbose("Successfuly connected with ssh")
+        if self.ssh is None or (self.ssh is not None and ( not self.ssh.get_transport() or (self.ssh.get_transport() and not self.ssh.get_transport().is_active()))):
+            self.logverbose("Connecting with ssh to the cluster")
+            self.ssh = paramiko.SSHClient()
+            self.ssh.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
+            self.ssh.connect(self.sshAdress, username=self.sshUser, key_filename=self.sshRSAkey, compress=True)
+            self.logverbose("Successfuly connected with ssh")
+        else:
+            self.logverbose("SSH connection is still alive, not opening a new one")
 
         # Load the node list
         self.logverbose("Loading the node list")
@@ -229,7 +234,7 @@ class SVCPlugin(base.Base):
                 lsdumpsList.add(line[4:-2])
                 junk1, junk2, node, day, minute = line[:-2].split('_')
                 timeString = "{0}_{1}".format(day, minute)
-                epoch = int(time.mktime(time.strptime(timeString, "%y%m%d_%H%M%S")))
+                epoch = time.mktime(time.strptime(timeString[:-2], "%y%m%d_%H%M"))
                 if epoch in timestamps:
                     timestamps[epoch]['counter'] = timestamps[epoch]['counter'] + 1
                 else:
@@ -239,17 +244,37 @@ class SVCPlugin(base.Base):
                     }
         self.logdebug("lsdumps set contains :\n {}".format(str(lsdumpsList)))
         self.logdebug("Timestamp counter is :\n {}".format(str(timestamps)))
-        for epoch in sorted(timestamps.keys(), reverse=True):
-            if timestamps[epoch]['counter'] == dumpCount :
-                self.time = epoch
-                break
-        self.logverbose("Timestamp used is {} corresponding string is {}".format(self.time, timestamps[self.time]['string']))
+        if self.forcedTime == 0: # Don't update the timestamp if the time is forced
+            for epoch in sorted(timestamps.keys(), reverse=True):
+                if timestamps[epoch]['counter'] == dumpCount :
+                    if self.time != 0 and epoch > self.time + self.interval: # If the last dumps are not the one following the last collect
+                        self.logverbose("Collecting missed stats between {} and {}".format(self.time, epoch))
+                        while self.time != epoch - self.interval: # Collect all stats missed if available
+                            self.logverbose("Catching up stats collection for timestamp {}".format(self.time))
+                            self.read_callback(timestamp=(self.time + self.interval))
+                        self.logverbose("Finished catching up with last timestamp")
+                    elif self.time != 0 and epoch < self.time + self.interval:
+                        break
+                    self.forcedTime = 0 # Finished catching up with last dumps
+                    if epoch == self.time + self.interval or self.time == 0:
+                        self.time = epoch
+                    break
+        else:
+            self.time = self.forcedTime
         
 
         # Compute old timestamp
-        newTimeString = timestamps[epoch]['string']
-        oldEpoch = self.time - int(self.interval) 
-        oldTimeString = time.strftime("%y%m%d_%H%M%S", time.localtime(oldEpoch))
+        if self.time in timestamps:
+            newTimeString = timestamps[self.time]['string']
+        else:
+            self.ssh.close()
+            return
+        self.logverbose("Timestamp used is {} corresponding string is {}".format(self.time, newTimeString))
+        oldEpoch = self.time - self.interval
+        if oldEpoch in timestamps:
+            oldTimeString = timestamps[oldEpoch]['string']
+        else:
+            oldTimeString = 'XXXXXX_XXXXXX'
 
         # Create the dumps directory if it does not exist yet
         dumpsFolder = '{}/svc-stats-dumps'.format(os.getcwd())
@@ -295,16 +320,22 @@ class SVCPlugin(base.Base):
             self.logverbose("Downloading new dumps")
             self.logdebug("String passed to scp.get is : /dumps/iostats/*{}".format(newTimeString))
             scp.get("/dumps/iostats/*{}".format(newTimeString), dumpsFolder)
-        self.ssh.close()
+        if self.forcedTime == 0:
+            self.ssh.close()
 
         # Load and parse the current files 
         self.logverbose("Loading and parsing the last files")
         stats = defaultdict(dict)
-        self.logdebug("Stats dumps directory contains : \n{}".format(str(os.listdir(dumpsFolder))))
+        downloadedList = str(os.listdir(dumpsFolder))
+        self.logdebug("Stats dumps directory contains : \n{}".format(downloadedList))
         for nodeId in nodeList:
             for statType in ['Nn', 'Nv', 'Nm']:
                 filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
-                stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+                if filename in downloadedList:
+                    stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+                else:
+                    collectd.info("Dump not downloaded, could not collect stats : {}".format(filename))
+                    return
             stats[nodeId]['sysid'] = stats[nodeId]['Nn'].get('id')
         self.logverbose("Finish dl and parsing new files")
 

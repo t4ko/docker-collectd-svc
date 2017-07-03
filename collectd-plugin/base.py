@@ -48,6 +48,7 @@ class Base(object):
         self.interval = 60.0
         self.cluster_handle = None
         self.time = 0
+        self.forcedTime = 0
         self.vdisksStatsCount = 0
         self.mdisksStatsCount = 0
         self.nodesStatsCount = 0
@@ -129,10 +130,8 @@ class Base(object):
         self.logdebug("sent metric %s.%s.%s.%s.%s"
                 % (plugin, plugin_instance, type, type_instance, value))
 
-    def read_callback(self):
-        self.vdisksStatsCount = 0
-        self.mdisksStatsCount = 0
-        self.nodesStatsCount = 0
+    def read_callback(self, timestamp = 0):
+        self.forcedTime = timestamp
         try:
             start = datetime.datetime.now()
             stats = self.get_stats()
@@ -140,6 +139,9 @@ class Base(object):
             if stats is not None:
                 collectd.info("%s : %d vdisks metrics : %d mdisks metrics : %d nodes metrics :: took %d seconds"
                         % (self.cluster, self.vdisksStatsCount, self.mdisksStatsCount, self.nodesStatsCount, (datetime.datetime.now() - start).seconds))
+            self.vdisksStatsCount = 0
+            self.mdisksStatsCount = 0
+            self.nodesStatsCount = 0
         except Exception as exc:
             collectd.error("%s: failed to get stats :: %s :: %s"
                     % (self.prefix, exc, traceback.format_exc()))
