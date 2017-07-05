@@ -137,7 +137,7 @@ class Base(object):
             stats = self.get_stats()
             self.dispatch(stats)
             if stats is not None:
-                collectd.info("%s : %d vdisks metrics : %d mdisks metrics : %d nodes metrics :: took %d seconds"
+                collectd.info("%s : Metrics collected : vdisks %d, mdisks %d, nodes %d : in %d sec"
                         % (self.cluster, self.vdisksStatsCount, self.mdisksStatsCount, self.nodesStatsCount, (datetime.datetime.now() - start).seconds))
             self.vdisksStatsCount = 0
             self.mdisksStatsCount = 0
@@ -151,11 +151,11 @@ class Base(object):
 
     def logverbose(self, msg):
         if self.verbose:
-            collectd.info("%s: %d : %s" % (self.prefix, time.time(), msg))
+            collectd.info("%s: %s : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
 
     def logdebug(self, msg):
         if self.debug:
-            collectd.info("%s: %d : %s" % (self.prefix, time.time(), msg))
+            collectd.info("%s: %s : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
 
     @staticmethod
     def reset_sigchld():
