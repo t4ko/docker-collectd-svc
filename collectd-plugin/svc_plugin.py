@@ -451,7 +451,7 @@ class SVCPlugin(base.Base):
 
         # CPU utilization : Nn File > cpu > busy (Extract the counter)
             cpu_utilization = stats[nodeId]['Nn'].find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy')
-            data[clusternode][node_sysid]['counter']['cpu_utilization'] = int(cpu_utilization) 
+            data[clusternode][node_sysid]['counter']['cpu_utilization'] = int(cpu_utilization / 10) 
 
         # read_data_rate : Nm file > mdsk > rb (512 bytes sector write)
         # read_io_rate : Nm file > mdsk > ro (read operation)
