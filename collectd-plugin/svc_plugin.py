@@ -49,6 +49,7 @@ class SVCPlugin(base.Base):
         base.Base.__init__(self)
         self.prefix = 'svc'
         self.ssh = None
+        self.stats_history = {}
 
     def allowWildcards(self, s):
         """Return a shell-escaped version of the string `s`."""
@@ -77,6 +78,7 @@ class SVCPlugin(base.Base):
             time.sleep(1)
         if attempt <= 0 and not commandSuccess:
             collectd.info("{} : Command {} failed {} times".format(str(int(time.time())), command, originalAttempt))
+            self.logverbose("Closing ssh connection")
             self.ssh.close()
         if attempt < originalAttempt and attempt > 0:
             collectd.info("{} : Command {} succeeded after {} retry".format(str(int(time.time())), command, originalAttempt - attempt))
@@ -94,6 +96,7 @@ class SVCPlugin(base.Base):
         if self.ssh is not None and self.forcedTime == 0:
             transport = self.ssh.get_transport()
             if transport and transport.is_active():
+                self.logverbose("Closing existing ssh connection")
                 self.ssh.close()
 
         self.logverbose("Beginning stats collection")
@@ -124,7 +127,42 @@ class SVCPlugin(base.Base):
             nodeList.add(nodeInfo[enclosure_id_index])
         self.logverbose("Loaded {} entry in the node list".format(len(nodeList)))
 
-
+        # Load the MdiskGrp names and their Mdisk from the svc cluster
+        self.logverbose("Loading the mdisk list")
+        mdiskGrpList = { }
+        mdiskList = { }
+        (success, stdout_mdsk) = self.check_command('lsmdisk -delim :')
+        if not success: return
+        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
+        for line in stdout_mdsk:
+            splittedLine = line.split(':')
+            if isFirst:
+                isFirst = False
+                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
+                continue
+            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
+                collectd.info('The first line of the output for \'lsmdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+                self.logverbose("Closing ssh connection")
+                self.ssh.close()
+                return
+            mdiskList[splittedLine[nameIndex]] = { 
+                'mdiskGrpName' : splittedLine[mdisk_grp_nameIndex], 
+                'ro' : 0, 
+                'wo' : 0, 
+                'rrp' : 0, 
+                'wrp' : 0 
+            }
+            mdiskGrpList[splittedLine[mdisk_grp_nameIndex]] = {
+                'ro' : 0, 
+                'wo' : 0, 
+                'rrp' : 0, 
+                'wrp' : 0,
+                'b_ro' : 0,
+                'b_wo' : 0,
+                'b_rrp': 0,
+                'b_wrp': 0
+            }
+        self.logverbose("Loaded {} entry in the mdisk list".format(len(mdiskList)))
 
         # Load the vdisk and their mdisk group
         self.logverbose("Loading the vdisk list")
@@ -141,6 +179,7 @@ class SVCPlugin(base.Base):
                 continue
             if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
                 collectd.info('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+                self.logverbose("Closing ssh connection")
                 self.ssh.close()
                 return
             vdiskList[splittedLine[nameIndex]] = { 
@@ -168,47 +207,12 @@ class SVCPlugin(base.Base):
                     continue
                 if vdisk_nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
                     collectd.info('The first line of the output for \'lsvdiskcopy -delim :\' is missing \'vdisk_name\' or \'mdisk_grp_name\'')
+                    self.logverbose("Closing ssh connection")
                     self.ssh.close()
                     return
                 if splittedLine[vdisk_nameIndex] in manyMdiskgrp and vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] == '':
                     vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
         self.logverbose("Loaded {} entry in the vdisk list".format(len(vdiskList)))
-
-        # Load the MdiskGrp names and their Mdisk from the svc cluster
-        self.logverbose("Loading the mdisk list")
-        mdiskGrpList = { }
-        mdiskList = { }
-        (success, stdout_mdsk) = self.check_command('lsmdisk -delim :')
-        if not success: return
-        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
-        for line in stdout_mdsk:
-            splittedLine = line.split(':')
-            if isFirst:
-                isFirst = False
-                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
-                continue
-            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
-                collectd.info('The first line of the output for \'lsmdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
-                self.ssh.close()
-                return
-            mdiskList[splittedLine[nameIndex]] = { 
-                'mdiskGrpName' : splittedLine[mdisk_grp_nameIndex], 
-                'ro' : 0, 
-                'wo' : 0, 
-                'rrp' : 0, 
-                'wrp' : 0 
-            }
-            mdiskGrpList[splittedLine[mdisk_grp_nameIndex]] = {
-                'ro' : 0, 
-                'wo' : 0, 
-                'rrp' : 0, 
-                'wrp' : 0,
-                'b_ro' : 0,
-                'b_wo' : 0,
-                'b_rrp': 0,
-                'b_wrp': 0
-            }
-        self.logverbose("Loaded {} entry in the mdisk list".format(len(mdiskList)))
 
 
 
@@ -249,8 +253,12 @@ class SVCPlugin(base.Base):
                     if self.time != 0 and epoch > self.time + self.interval: # If the last dumps are not the one following the last collect
                         self.logverbose("Collecting missed stats between {} and {}".format(self.time, epoch))
                         while self.time != epoch - self.interval: # Collect all stats missed if available
-                            self.logverbose("Catching up stats collection for timestamp {}".format(self.time))
-                            self.read_callback(timestamp=(self.time + self.interval))
+                            if (self.time - self.interval in timestamps) and (timestamps[self.time - self.interval]['counter'] == dumpCount): # The dumps are still on the cluster
+                                self.logverbose("Catching up stats collection for timestamp {}".format(self.time))
+                                self.read_callback(timestamp=(self.time + self.interval))
+                            else: # The dumps are not available anymore
+                                self.logverbose("Stats dumps are no more available for timestamps {}".format(self.time))
+                                self.time = self.time + self.interval
                         self.logverbose("Finished catching up with last timestamp")
                     elif self.time != 0 and epoch < self.time + self.interval:
                         break
@@ -260,12 +268,12 @@ class SVCPlugin(base.Base):
                     break
         else:
             self.time = self.forcedTime
-        
 
         # Compute old timestamp
         if self.time in timestamps:
             newTimeString = timestamps[self.time]['string']
         else:
+            self.logverbose("Closing ssh connection")
             self.ssh.close()
             return
         self.logverbose("Timestamp used is {}".format(newTimeString))
@@ -285,6 +293,7 @@ class SVCPlugin(base.Base):
         for dumpName in dumpsList:
             if newTimeString in dumpName:
                 collectd.info("New stats dumps are not yet available")
+                self.logverbose("Closing ssh connection")
                 self.ssh.close()
                 return
 
@@ -305,7 +314,6 @@ class SVCPlugin(base.Base):
         t = self.ssh.get_transport()
         scp = SCPClient(t, socket_timeout=30.0, sanitize=self.allowWildcards)
 
-
         if not oldFileDownloaded:
             for oldFileName in oldDumpsList:
                 if oldFileName not in lsdumpsList:
@@ -320,6 +328,7 @@ class SVCPlugin(base.Base):
             self.logdebug("String passed to scp.get is : /dumps/iostats/*{}".format(newTimeString))
             scp.get("/dumps/iostats/*{}".format(newTimeString), dumpsFolder)
         if self.forcedTime == 0:
+            self.logverbose("Closing ssh connection")
             self.ssh.close()
 
         # Load and parse the current files 
@@ -342,12 +351,14 @@ class SVCPlugin(base.Base):
         if useOld == 1:
             self.logverbose("Loading and parsing the old files")
             old_stats = defaultdict(dict)
-            for filename in oldDumpsList :
-                statType, junk1, nodeId, junk2, junk3 = filename.split('_')
-                old_stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
             for nodeId in nodeList:
-                old_stats[nodeId]['sysid'] = old_stats[nodeId]['Nn'].get('id')
-
+                if not (nodeId in self.stats_history and self.stats_history[nodeId]['time'] == self.time - self.interval):            
+                    for filename in oldDumpsList :
+                        statType, junk1, nodeId, junk2, junk3 = filename.split('_')
+                        old_stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+                    for panelId in nodeList:
+                        old_stats[panelId]['sysid'] = old_stats[panelId]['Nn'].get('id')
+                    break
 
         # Remove old stats files
         for filename in dumpsList:
@@ -364,6 +375,7 @@ class SVCPlugin(base.Base):
         self.logverbose("Initializing data structures")
         ## Metrics for SVC nodes
         data = { clusternode : {}, clustervdsk : {}, clustermdsk : {} }
+
         # Initialize the structure for storing the collected data for nodes
         for nodeId in nodeList:
             data[clusternode][stats[nodeId]['sysid']] = { 'counter' : {}, 'gauge' : {} }
@@ -379,6 +391,7 @@ class SVCPlugin(base.Base):
                 'write_response_time' : 0,
                 'write_cache_delay_percentage' : 0
             }
+
         # Initialize the structure for storing the collected data for mdisks
         for mdisk in mdiskList:
             data[clustermdsk][mdiskList[mdisk]['mdiskGrpName']] = { 'counter' : {}, 'gauge' : {} }
@@ -398,6 +411,7 @@ class SVCPlugin(base.Base):
                 'read_response_time' : 0,
                 'write_response_time' : 0
             }
+
         # Initialize the structure for storing the collected data for vdisks
         for vdisk in vdiskList:
             data[clustervdsk][vdisk] = { 'counter' : {}, 'gauge' : {} }
@@ -411,7 +425,6 @@ class SVCPlugin(base.Base):
                 'read_response_time' : 0, 
                 'write_response_time' : 0
             }
-        
 
 
 
@@ -425,15 +438,20 @@ class SVCPlugin(base.Base):
         ## Iterate over the nodes to analyse their stats files
         for nodeId in nodeList:
             node_sysid = stats[nodeId]['sysid'] #for lisibility
-            #node_ports = stats[nodeId]['Nn'].findall('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}port')
             node_vdisks = stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk')
             node_mdisks = stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk')
 
+            if useOld == 1:
+                if nodeId in self.stats_history and self.stats_history[nodeId]['time'] == self.time - self.interval:
+                    old_node_vdisks = self.stats_history[nodeId]['vdisks']
+                    old_node_mdisks = self.stats_history[nodeId]['mdisks']
+                else:
+                    old_node_vdisks = set(old_stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'))
+                    old_node_mdisks = set(old_stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'))
 
         # CPU utilization : Nn File > cpu > busy (Extract the counter)
             cpu_utilization = stats[nodeId]['Nn'].find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy')
             data[clusternode][node_sysid]['counter']['cpu_utilization'] = int(cpu_utilization) 
-
 
         # read_data_rate : Nm file > mdsk > rb (512 bytes sector write)
         # read_io_rate : Nm file > mdsk > ro (read operation)
@@ -444,13 +462,11 @@ class SVCPlugin(base.Base):
                 data[clusternode][node_sysid]['counter']['read_io_rate'] += int(mdisk.get('ro'))
                 data[clusternode][node_sysid]['counter']['write_data_rate'] += (int(mdisk.get('wb')) * 512)
                 data[clusternode][node_sysid]['counter']['write_io_rate'] += int(mdisk.get('wo'))
-        
 
         # read_response_time : Nm file > mdsk > ure (read external response time (microsecond))
         # write_response_time : Nm file > mdsk > uwe (write external response time (microsecond))
             total_rrp, total_ro, total_wrp, total_wo, mdisks_count = 0, 0, 0, 0, len(node_mdisks)
             if useOld == 1:
-                old_node_mdisks = set(old_stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'))
                 for mdisk in node_mdisks:
                     total_ro += int(mdisk.get('ro'))
                     total_wo += int(mdisk.get('wo'))
@@ -475,7 +491,6 @@ class SVCPlugin(base.Base):
             write_cache_delay_percentage, ctw, ctwft, ctwwt = 0, 0, 0, 0
             if useOld == 1:
                 oldVdiskList = {}
-                old_node_vdisks = old_stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk')
                 for old_vdisk in old_node_vdisks:
                     oldVdiskList[old_vdisk.get('idx')] = { 
                         'ctw' : old_vdisk.get('ctw'), 
@@ -533,11 +548,9 @@ class SVCPlugin(base.Base):
                     vdiskList[vdiskId]['rrp']  += int(vdisk.get('rl'))
                     vdiskList[vdiskId]['wrp']  += int(vdisk.get('wl'))
 
-
         # read_response_time : Nv file > vdsk > rl
         # write_response_time : Nv file > vdsk > wl
             if useOld == 1:
-                old_node_vdisks = old_stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}vdsk')
                 for vdisk in old_node_vdisks:
                     vdiskId = vdisk.get('id')
                     if(vdiskId in vdiskList):
@@ -546,35 +559,41 @@ class SVCPlugin(base.Base):
                         vdiskList[vdiskId]['rrp']  -= int(vdisk.get('rl'))
                         vdiskList[vdiskId]['wrp']  -= int(vdisk.get('wl'))
 
-
         # backend_read_data_rate : Nm file > mdsk > rb (512 bytes blocks read)
         # backend_read_io_rate : Nm file > mdsk > ro (read operation)
         # backend_write_data_rate : Nm file > mdsk > wb (512 bytes blocks write)
         # backend_write_io_rate : Nm file > mdsk > wo (write operation) 
             for mdisk in node_mdisks:
-                mdiskGrp = mdiskList[mdisk.get('id')]['mdiskGrpName']
+                mdiskid = mdisk.get('id')
+                mdiskGrp = mdiskList[mdiskid]['mdiskGrpName']
                 rb, wb, ro, wo = int(mdisk.get('rb')) * 512 , int(mdisk.get('wb')) * 512 , int(mdisk.get('ro')), int(mdisk.get('wo'))
                 data[clustermdsk][mdiskGrp]['counter']['backend_read_data_rate'] += rb
                 data[clustermdsk][mdiskGrp]['counter']['backend_read_io_rate'] += ro
                 data[clustermdsk][mdiskGrp]['counter']['backend_write_data_rate'] += wb
                 data[clustermdsk][mdiskGrp]['counter']['backend_write_io_rate'] += wo
-                if(mdisk.get('id') in mdiskList):
-                    mdiskList[mdisk.get('id')]['ro'] += ro
-                    mdiskList[mdisk.get('id')]['wo']  += wo
-                    mdiskList[mdisk.get('id')]['rrp']  += int(mdisk.get('re'))
-                    mdiskList[mdisk.get('id')]['wrp']  += int(mdisk.get('we'))
+                if(mdiskid in mdiskList):
+                    mdiskList[mdiskid]['ro'] += ro
+                    mdiskList[mdiskid]['wo']  += wo
+                    mdiskList[mdiskid]['rrp']  += int(mdisk.get('re'))
+                    mdiskList[mdiskid]['wrp']  += int(mdisk.get('we'))
 
         # backend_read_response_time
         # backend_write_response_time
             if useOld == 1:
-                old_node_mdisks = old_stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk')
                 for mdisk in old_node_mdisks:
-                    if(mdisk.get('id') in mdiskList):
-                        mdiskList[mdisk.get('id')]['ro'] -= int(mdisk.get('ro'))
-                        mdiskList[mdisk.get('id')]['wo']  -= int(mdisk.get('wo'))
-                        mdiskList[mdisk.get('id')]['rrp']  -= int(mdisk.get('re'))
-                        mdiskList[mdisk.get('id')]['wrp']  -= int(mdisk.get('we'))
+                    mdiskid = mdisk.get('id')
+                    if(mdiskid in mdiskList):
+                        mdiskList[mdiskid]['ro'] -= int(mdisk.get('ro'))
+                        mdiskList[mdiskid]['wo']  -= int(mdisk.get('wo'))
+                        mdiskList[mdiskid]['rrp']  -= int(mdisk.get('re'))
+                        mdiskList[mdiskid]['wrp']  -= int(mdisk.get('we'))
 
+            if nodeId not in self.stats_history:
+                self.stats_history[nodeId] = {}
+            self.stats_history[nodeId]['time'] = self.time
+            self.stats_history[nodeId]['sysid'] = node_sysid
+            self.stats_history[nodeId]['vdisks'] = node_vdisks
+            self.stats_history[nodeId]['mdisks'] = node_mdisks
 
 
 
@@ -602,14 +621,12 @@ class SVCPlugin(base.Base):
             else : 
                 data[clustervdsk][vdisk]['gauge']['write_response_time'] += vdiskList[vdisk]['wrp'] / vdiskList[vdisk]['wo']
 
-
         # Aggregate metrics of individual mdisks by mdiskGrg
         for mdisk in mdiskList: 
             mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_ro'] += mdiskList[mdisk]['ro']
             mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_wo'] += mdiskList[mdisk]['wo']
             mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_rrp'] += mdiskList[mdisk]['rrp']
             mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_wrp'] += mdiskList[mdisk]['wrp']
-
 
         # Get average response time by IO (total response time / numbers of IO)
 
