@@ -130,7 +130,6 @@ class SVCPlugin(base.Base):
 
         # Load the timezone
         if self.timezone == None:
-            self.loginfo(time.strftime("%z", time.gmtime()))
             (success, stdout) = self.check_command('showtimezone -nohdr -delim :')
             if not success: return
             for line in stdout:
@@ -281,7 +280,6 @@ class SVCPlugin(base.Base):
                     break
         else:
             self.time = self.forcedTime
-        self.loginfo(str(self.time))
 
         # Compute old timestamp
         if self.time in timestamps:
@@ -539,25 +537,25 @@ class SVCPlugin(base.Base):
         # write_io_rate : Nv file > vdsk > wo (write operation)
             for vdisk in node_vdisks:
                 vdiskId = vdisk.get('id')
-                mdiskGrp = vdiskList[vdiskId]['mdiskGrpName']
-                rb, wb, ro, wo = int(vdisk.get('rb')) * 512 , int(vdisk.get('wb')) * 512 , int(vdisk.get('ro')), int(vdisk.get('wo'))
+                if(vdiskId in vdiskList): 
+                    mdiskGrp = vdiskList[vdiskId]['mdiskGrpName']
+                    rb, wb, ro, wo = int(vdisk.get('rb')) * 512 , int(vdisk.get('wb')) * 512 , int(vdisk.get('ro')), int(vdisk.get('wo'))
 
-                data[clustermdsk][mdiskGrp]['counter']['read_data_rate'] += rb
-                data[clustermdsk][mdiskGrp]['counter']['read_io_rate'] += ro
-                data[clustermdsk][mdiskGrp]['counter']['write_data_rate'] += wb
-                data[clustermdsk][mdiskGrp]['counter']['write_io_rate'] += wo
+                    data[clustermdsk][mdiskGrp]['counter']['read_data_rate'] += rb
+                    data[clustermdsk][mdiskGrp]['counter']['read_io_rate'] += ro
+                    data[clustermdsk][mdiskGrp]['counter']['write_data_rate'] += wb
+                    data[clustermdsk][mdiskGrp]['counter']['write_io_rate'] += wo
 
         ## Metrics for vdisks
         # read_io_rate Nv > vdsk > ro
         # write_io_rate Nv > vdsk > wo
         # read_data_rate Nv > vdsk > wo
         # write_data_rate Nv > vdsk > wo
-                data[clustervdsk][vdiskId]['counter']['read_data_rate'] += rb
-                data[clustervdsk][vdiskId]['counter']['write_data_rate'] += wb
-                data[clustervdsk][vdiskId]['counter']['read_io_rate'] += ro
-                data[clustervdsk][vdiskId]['counter']['write_io_rate'] += wo
+                    data[clustervdsk][vdiskId]['counter']['read_data_rate'] += rb
+                    data[clustervdsk][vdiskId]['counter']['write_data_rate'] += wb
+                    data[clustervdsk][vdiskId]['counter']['read_io_rate'] += ro
+                    data[clustervdsk][vdiskId]['counter']['write_io_rate'] += wo
 
-                if(vdiskId in vdiskList):
                     vdiskList[vdiskId]['ro'] += ro
                     vdiskList[vdiskId]['wo']  += wo
                     vdiskList[vdiskId]['rrp']  += int(vdisk.get('rl'))
@@ -580,13 +578,14 @@ class SVCPlugin(base.Base):
         # backend_write_io_rate : Nm file > mdsk > wo (write operation) 
             for mdisk in node_mdisks:
                 mdiskid = mdisk.get('id')
-                mdiskGrp = mdiskList[mdiskid]['mdiskGrpName']
-                rb, wb, ro, wo = int(mdisk.get('rb')) * 512 , int(mdisk.get('wb')) * 512 , int(mdisk.get('ro')), int(mdisk.get('wo'))
-                data[clustermdsk][mdiskGrp]['counter']['backend_read_data_rate'] += rb
-                data[clustermdsk][mdiskGrp]['counter']['backend_read_io_rate'] += ro
-                data[clustermdsk][mdiskGrp]['counter']['backend_write_data_rate'] += wb
-                data[clustermdsk][mdiskGrp]['counter']['backend_write_io_rate'] += wo
                 if(mdiskid in mdiskList):
+                    mdiskGrp = mdiskList[mdiskid]['mdiskGrpName']
+                    rb, wb, ro, wo = int(mdisk.get('rb')) * 512 , int(mdisk.get('wb')) * 512 , int(mdisk.get('ro')), int(mdisk.get('wo'))
+                    data[clustermdsk][mdiskGrp]['counter']['backend_read_data_rate'] += rb
+                    data[clustermdsk][mdiskGrp]['counter']['backend_read_io_rate'] += ro
+                    data[clustermdsk][mdiskGrp]['counter']['backend_write_data_rate'] += wb
+                    data[clustermdsk][mdiskGrp]['counter']['backend_write_io_rate'] += wo
+                
                     mdiskList[mdiskid]['ro'] += ro
                     mdiskList[mdiskid]['wo']  += wo
                     mdiskList[mdiskid]['rrp']  += int(mdisk.get('re'))
