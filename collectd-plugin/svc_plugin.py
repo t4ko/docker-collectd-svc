@@ -50,6 +50,7 @@ class SVCPlugin(base.Base):
         self.prefix = 'svc'
         self.ssh = None
         self.stats_history = {}
+        self.timezone = None
 
     def allowWildcards(self, s):
         """Return a shell-escaped version of the string `s`."""
@@ -57,7 +58,7 @@ class SVCPlugin(base.Base):
         if not s:
             return b""
         if _check_safe(s) is None:
-            collectd.info("File name is not a dump file name")
+            self.loginfo("File name is not a dump file name")
             return b""
         return s
 
@@ -77,11 +78,11 @@ class SVCPlugin(base.Base):
             attempt = attempt - 1 
             time.sleep(1)
         if attempt <= 0 and not commandSuccess:
-            collectd.info("{} : Command {} failed {} times".format(str(int(time.time())), command, originalAttempt))
+            self.loginfo("Command {} failed {} times".format(str(int(time.time())), command, originalAttempt))
             self.logverbose("Closing ssh connection")
             self.ssh.close()
         if attempt < originalAttempt and attempt > 0:
-            collectd.info("{} : Command {} succeeded after {} retry".format(str(int(time.time())), command, originalAttempt - attempt))
+            self.loginfo("Command {} succeeded after {} retry".format(str(int(time.time())), command, originalAttempt - attempt))
         return commandSuccess, stdout
 
     def get_stats(self):
@@ -127,6 +128,18 @@ class SVCPlugin(base.Base):
             nodeList.add(nodeInfo[enclosure_id_index])
         self.logverbose("Loaded {} entry in the node list".format(len(nodeList)))
 
+        # Load the timezone
+        if self.timezone == None:
+            self.loginfo(time.strftime("%z", time.gmtime()))
+            (success, stdout) = self.check_command('showtimezone -nohdr -delim :')
+            if not success: return
+            for line in stdout:
+                self.timezone = line.split(':')[1].replace('\n', '')
+                break
+            os.environ['TZ'] = self.timezone
+            time.tzset()
+            self.logverbose("Working timezone set to {} {}".format(os.environ['TZ'], time.strftime("%z", time.localtime())))
+
         # Load the MdiskGrp names and their Mdisk from the svc cluster
         self.logverbose("Loading the mdisk list")
         mdiskGrpList = { }
@@ -141,7 +154,7 @@ class SVCPlugin(base.Base):
                 nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
                 continue
             if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
-                collectd.info('The first line of the output for \'lsmdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+                self.loginfo('The first line of the output for \'lsmdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
                 self.logverbose("Closing ssh connection")
                 self.ssh.close()
                 return
@@ -178,7 +191,7 @@ class SVCPlugin(base.Base):
                 nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
                 continue
             if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
-                collectd.info('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+                self.loginfo('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
                 self.logverbose("Closing ssh connection")
                 self.ssh.close()
                 return
@@ -206,7 +219,7 @@ class SVCPlugin(base.Base):
                     vdisk_nameIndex, mdisk_grp_nameIndex = splittedLine.index('vdisk_name'), splittedLine.index('mdisk_grp_name')
                     continue
                 if vdisk_nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
-                    collectd.info('The first line of the output for \'lsvdiskcopy -delim :\' is missing \'vdisk_name\' or \'mdisk_grp_name\'')
+                    self.loginfo('The first line of the output for \'lsvdiskcopy -delim :\' is missing \'vdisk_name\' or \'mdisk_grp_name\'')
                     self.logverbose("Closing ssh connection")
                     self.ssh.close()
                     return
@@ -268,6 +281,7 @@ class SVCPlugin(base.Base):
                     break
         else:
             self.time = self.forcedTime
+        self.loginfo(str(self.time))
 
         # Compute old timestamp
         if self.time in timestamps:
@@ -292,7 +306,7 @@ class SVCPlugin(base.Base):
         dumpsList = os.listdir(dumpsFolder)
         for dumpName in dumpsList:
             if newTimeString in dumpName:
-                collectd.info("New stats dumps are not yet available")
+                self.loginfo("New stats dumps are not yet available")
                 self.logverbose("Closing ssh connection")
                 self.ssh.close()
                 return
@@ -342,9 +356,10 @@ class SVCPlugin(base.Base):
                 if filename in downloadedList:
                     stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
                 else:
-                    collectd.info("Dump not downloaded, could not collect stats : {}".format(filename))
+                    self.loginfo("Dump not downloaded, could not collect stats : {}".format(filename))
                     return
             stats[nodeId]['sysid'] = stats[nodeId]['Nn'].get('id')
+            self.logdebug("{} has sysid {}".format(nodeId, stats[nodeId]['sysid']))
         self.logverbose("Finish dl and parsing new files")
 
         # Load and parse previous files if they are available

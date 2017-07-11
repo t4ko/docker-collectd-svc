@@ -120,7 +120,7 @@ class Base(object):
             val.type_instance=type
         val.values=[value]
         val.interval = self.interval
-        val.dispatch(time=self.time)
+        val.dispatch(time=self.time) #passed time is UTC
         if "node" in plugin:
             self.nodesStatsCount += 1
         elif "mdsk" in plugin:
@@ -133,12 +133,12 @@ class Base(object):
     def read_callback(self, timestamp = 0):
         self.forcedTime = timestamp
         try:
-            start = datetime.datetime.now()
+            start = time.time()
             stats = self.get_stats()
             self.dispatch(stats)
             if stats is not None:
                 collectd.info("%s : Metrics collected : vdisks %d, mdisks %d, nodes %d : in %d sec"
-                        % (self.cluster, self.vdisksStatsCount, self.mdisksStatsCount, self.nodesStatsCount, (datetime.datetime.now() - start).seconds))
+                        % (self.cluster, self.vdisksStatsCount, self.mdisksStatsCount, self.nodesStatsCount, int(time.time() - start)))
             self.vdisksStatsCount = 0
             self.mdisksStatsCount = 0
             self.nodesStatsCount = 0
@@ -157,6 +157,9 @@ class Base(object):
         if self.debug:
             collectd.info("%s: %s : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
 
+    def loginfo(self, msg):
+        collectd.info("%s: %s : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
+        
     @staticmethod
     def reset_sigchld():
         signal.signal(signal.SIGCHLD, signal.SIG_DFL)
