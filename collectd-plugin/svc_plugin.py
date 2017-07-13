@@ -664,31 +664,33 @@ class SVCPlugin(base.Base):
 
 
 # Make rates out of counters and remove unnecessary precision
-            for node_sysid in data[clusternode]:
-                data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['read_data_rate'] = int(data[clusternode][node_sysid]['gauge']['read_data_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['read_io_rate'] = int(data[clusternode][node_sysid]['gauge']['read_io_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['write_data_rate'] = int(data[clusternode][node_sysid]['gauge']['write_data_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['write_io_rate'] = int(data[clusternode][node_sysid]['gauge']['write_io_rate'] / self.interval)
-            for mdiskGrp in data[clustermdsk]:
-                #mdisk
-                data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] / self.interval)
-            for vdiskId in data[clustervdsk]:
-                #vdisk
-                data[clustervdsk][vdiskId]['gauge']['read_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_data_rate'] / self.interval)
-                data[clustervdsk][vdiskId]['gauge']['write_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_data_rate'] / self.interval)
-                data[clustervdsk][vdiskId]['gauge']['read_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_io_rate'] / self.interval)
-                data[clustervdsk][vdiskId]['gauge']['write_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_io_rate'] / self.interval)
+        for node_sysid in data[clusternode]:
+            data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['read_data_rate'] = int(data[clusternode][node_sysid]['gauge']['read_data_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['read_io_rate'] = int(data[clusternode][node_sysid]['gauge']['read_io_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['write_data_rate'] = int(data[clusternode][node_sysid]['gauge']['write_data_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['write_io_rate'] = int(data[clusternode][node_sysid]['gauge']['write_io_rate'] / self.interval)
+
+        for mdiskGrp in data[clustermdsk]:
+            #mdisk
+            data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] / self.interval)
+
+        for vdiskId in data[clustervdsk]:
+            #vdisk
+            data[clustervdsk][vdiskId]['gauge']['read_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_data_rate'] / self.interval)
+            data[clustervdsk][vdiskId]['gauge']['write_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_data_rate'] / self.interval)
+            data[clustervdsk][vdiskId]['gauge']['read_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_io_rate'] / self.interval)
+            data[clustervdsk][vdiskId]['gauge']['write_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_io_rate'] / self.interval)
 
 
 
