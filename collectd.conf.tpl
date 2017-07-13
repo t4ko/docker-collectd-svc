@@ -12,7 +12,7 @@ LoadPlugin write_graphite
    Port "{{ GRAPHITE_PORT | default("2003") }}"
    Protocol "tcp"
    Prefix "{{ GRAPHITE_PREFIX | default("svc") }}."
-   StoreRates true
+   StoreRates false
    AlwaysAppendDS false
    SeparateInstances true
    PreserveSeparator true

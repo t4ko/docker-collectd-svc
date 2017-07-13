@@ -90,6 +90,7 @@ class Base(object):
             return
 
         self.logdebug("dispatching %d new stats :: %s" % (len(stats), stats))
+        self.logdebug("Timestamp passed to carbon database is {}".format(self.time))
         try:
             for plugin in stats.keys():
                 for plugin_instance in stats[plugin].keys():
@@ -127,8 +128,8 @@ class Base(object):
             self.mdisksStatsCount += 1
         elif "vdsk" in plugin:
             self.vdisksStatsCount +=1
-        self.logdebug("sent metric %s.%s.%s.%s.%s"
-                % (plugin, plugin_instance, type, type_instance, value))
+        # self.logdebug("sent metric %s.%s.%s.%s.%s"
+        #         % (plugin, plugin_instance, type, type_instance, value))
 
     def read_callback(self, timestamp = 0):
         self.forcedTime = timestamp
