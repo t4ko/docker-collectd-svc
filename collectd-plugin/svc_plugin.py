@@ -50,6 +50,7 @@ class SVCPlugin(base.Base):
         self.prefix = 'svc'
         self.ssh = None
         self.stats_history = {}
+        self.catchup = {}
         self.timezone = None
 
     def allowWildcards(self, s):
@@ -85,6 +86,22 @@ class SVCPlugin(base.Base):
             self.loginfo("Command {} succeeded after {} retry".format(str(int(time.time())), command, originalAttempt - attempt))
         return commandSuccess, stdout
 
+    def check_ssh(self):
+        """Check that the ssh connection is established properly, return a boolean"""
+        if self.ssh is not None:
+            transport = self.ssh.get_transport()
+        if self.ssh is None or (self.ssh is not None and (not transport or (transport and not transport.is_active()))):
+            if self.ssh is not None:
+                self.ssh.close()
+                self.logverbose("SSH connection not properly established, restarting connection")
+            self.ssh = paramiko.SSHClient()
+            self.ssh.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
+            self.ssh.connect(self.sshAdress, username=self.sshUser, key_filename=self.sshRSAkey, compress=True)
+            self.logverbose("Successfuly connected with ssh")
+            return False
+        else:
+            return True
+
     def get_stats(self):
         """Retrieves stats from the svc cluster pools"""
 
@@ -102,13 +119,7 @@ class SVCPlugin(base.Base):
 
         self.logverbose("Beginning stats collection")
         # Connect with ssh to svc
-        if self.ssh is None or (self.ssh is not None and ( not self.ssh.get_transport() or (self.ssh.get_transport() and not self.ssh.get_transport().is_active()))):
-            self.logverbose("Connecting with ssh to the cluster")
-            self.ssh = paramiko.SSHClient()
-            self.ssh.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
-            self.ssh.connect(self.sshAdress, username=self.sshUser, key_filename=self.sshRSAkey, compress=True)
-            self.logverbose("Successfuly connected with ssh")
-        else:
+        if self.check_ssh():
             self.logverbose("SSH connection is still alive, not opening a new one")
 
         # Load the node list
@@ -259,25 +270,39 @@ class SVCPlugin(base.Base):
                     }
         self.logdebug("lsdumps set contains :\n {}".format(str(lsdumpsList)))
         self.logdebug("Timestamp counter is :\n {}".format(str(timestamps)))
+        currentTime = 0
         if self.forcedTime == 0: # Don't update the timestamp if the time is forced
+            currentTime = self.time
             for epoch in sorted(timestamps.keys(), reverse=True):
                 if timestamps[epoch]['counter'] == dumpCount :
-                    if self.time != 0 and epoch > self.time + self.interval: # If the last dumps are not the one following the last collect
-                        self.logverbose("Collecting missed stats between {} and {}".format(self.time, epoch))
-                        while self.time != epoch - self.interval: # Collect all stats missed if available
-                            if (self.time - self.interval in timestamps) and (timestamps[self.time - self.interval]['counter'] == dumpCount): # The dumps are still on the cluster
-                                self.logverbose("Catching up stats collection for timestamp {}".format(self.time))
-                                self.read_callback(timestamp=(self.time + self.interval))
-                            else: # The dumps are not available anymore
-                                self.logverbose("Stats dumps are no more available for timestamps {}".format(self.time))
-                                self.time = self.time + self.interval
-                        self.logverbose("Finished catching up with last timestamp")
+                    if self.time != 0 and epoch > self.time + self.interval: # If the most recent timestamps is not the one corresponding to the interval
+                        while self.time != epoch - self.interval: # Add missing timestamps to the catchup list
+                            self.logverbose("Stats not available for timestamp {}, data will be collected later")
+                            temptimestring = time.strftime("%y%m%d_%H%M", time.localtime(self.time))
+                            catchup[self.time] = temptimestring
+                            self.time = self.time + self.interval
                     elif self.time != 0 and epoch < self.time + self.interval:
                         break
-                    self.forcedTime = 0 # Finished catching up with last dumps
                     if epoch == self.time + self.interval or self.time == 0:
-                        self.time = epoch
+                        currentTime = epoch
                     break
+
+            #Catch up available dumps collect
+            for catchupEpoch in sorted (self.catchup.keys(), reverse=True):
+                if (catchupEpoch in timestamps) and (timestamps[catchupEpoch]['counter'] == dumpCount): # The dumps are still on the cluster
+                    self.logverbose("Catching up stats collection for timestamp {}".format(self.time))
+                    self.read_callback(timestamp=(self.time + self.interval))
+                else:
+                    tempCount = 0
+                    for epoch in sorted(timestamps.keys(), reverse=True):
+                        if int(epoch) >= int(catchupEpoch):
+                            tempCount = tempCount + 1
+                            if tempCount >= 15: #Remove timestamps that can't be collected
+                                self.logverbose("Stats dumps are no more available for timestamps {}".format(self.catchup[catchupEpoch]))
+                                del self.catchup[catchupEpoch]
+                                break
+            self.forcedTime = 0
+            self.time = currentTime
         else:
             self.time = self.forcedTime
 
@@ -322,6 +347,7 @@ class SVCPlugin(base.Base):
                     oldFileDownloaded = False
 
         # Download the file from the SVC cluster if they are available
+        self.check_ssh()
         self.logverbose("Downloading the dumps with scp")
         t = self.ssh.get_transport()
         scp = SCPClient(t, socket_timeout=30.0, sanitize=self.allowWildcards)
