@@ -255,11 +255,12 @@ class SVCPlugin(base.Base):
         dumpCount = len(nodeList) * 4
         self.logdebug("Lsdumps returns : ")
         for line in reversed(list(stdout)):
-            self.logdebug(line.replace('\n', ''))
+            line = line.replace('\n', '')
+            self.logdebug(line)
             if 'id  filename' not in line:
-                lsdumpsList.add(line[4:-2])
-                junk1, junk2, node, day, minute = line[:-2].split('_')
-                timeString = "{0}_{1}".format(day, minute)
+                lsdumpsList.add(line[4:])
+                junk1, junk2, node, day, minute = line.split('_')
+                timeString = "{0}_{1}".format(day, minute[:6])
                 epoch = time.mktime(time.strptime(timeString[:-2], "%y%m%d_%H%M"))
                 if epoch in timestamps:
                     timestamps[epoch]['counter'] = timestamps[epoch]['counter'] + 1
@@ -289,14 +290,14 @@ class SVCPlugin(base.Base):
                     break
 
             #Catch up available dumps collect
-            for catchupEpoch in sorted (self.catchup.keys(), reverse=True):
+            for catchupEpoch in sorted (self.catchup.keys()):
                 if (catchupEpoch in timestamps) and (timestamps[catchupEpoch]['counter'] == dumpCount): # The dumps are still on the cluster
                     self.logverbose("Catching up stats collection for timestamp {}".format(self.catchup[catchupEpoch]))
                     self.read_callback(timestamp=(catchupEpoch))
                     del self.catchup[catchupEpoch]
                 else:
                     tempCount = 0
-                    for epoch in sorted(timestamps.keys(), reverse=True):
+                    for epoch in sorted(timestamps.keys()):
                         if int(epoch) >= int(catchupEpoch):
                             tempCount = tempCount + 1
                             if tempCount >= 15: #Remove timestamps that can't be collected
