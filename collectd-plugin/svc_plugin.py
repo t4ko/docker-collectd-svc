@@ -91,7 +91,7 @@ class SVCPlugin(base.Base):
         if self.ssh is not None:
             transport = self.ssh.get_transport()
         if self.ssh is None or (self.ssh is not None and (not transport or (transport and not transport.is_active()))):
-            if self.ssh is not None:
+            if self.ssh is not None and transport and not transport.is_active():
                 self.ssh.close()
                 self.logverbose("SSH connection not properly established, restarting connection")
             self.ssh = paramiko.SSHClient()
@@ -275,12 +275,13 @@ class SVCPlugin(base.Base):
             currentTime = self.time
             for epoch in sorted(timestamps.keys(), reverse=True):
                 if timestamps[epoch]['counter'] == dumpCount :
+                    self.logverbose("Most recent dumps available use timestamp {}".format(timestamps[epoch]['string']))
                     if self.time != 0 and epoch > self.time + self.interval: # If the most recent timestamps is not the one corresponding to the interval
                         while self.time != epoch - self.interval: # Add missing timestamps to the catchup list
-                            self.logverbose("Stats not available for timestamp {}, data will be collected later")
-                            temptimestring = time.strftime("%y%m%d_%H%M", time.localtime(self.time))
-                            catchup[self.time] = temptimestring
                             self.time = self.time + self.interval
+                            temptimestring = time.strftime("%y%m%d_%H%M", time.localtime(self.time))
+                            self.logverbose("Intermediate stats with timestamp {} will be collected later".format(temptimestring))
+                            self.catchup[self.time] = temptimestring  
                     elif self.time != 0 and epoch < self.time + self.interval:
                         break
                     if epoch == self.time + self.interval or self.time == 0:
@@ -290,8 +291,9 @@ class SVCPlugin(base.Base):
             #Catch up available dumps collect
             for catchupEpoch in sorted (self.catchup.keys(), reverse=True):
                 if (catchupEpoch in timestamps) and (timestamps[catchupEpoch]['counter'] == dumpCount): # The dumps are still on the cluster
-                    self.logverbose("Catching up stats collection for timestamp {}".format(self.time))
-                    self.read_callback(timestamp=(self.time + self.interval))
+                    self.logverbose("Catching up stats collection for timestamp {}".format(self.catchup[catchupEpoch]))
+                    self.read_callback(timestamp=(catchupEpoch))
+                    del self.catchup[catchupEpoch]
                 else:
                     tempCount = 0
                     for epoch in sorted(timestamps.keys(), reverse=True):
@@ -313,7 +315,7 @@ class SVCPlugin(base.Base):
             self.logverbose("Closing ssh connection")
             self.ssh.close()
             return
-        self.logverbose("Timestamp used is {}".format(newTimeString))
+        self.logverbose("Collecting stats for timestamp {}".format(newTimeString))
         oldEpoch = self.time - self.interval
         if oldEpoch in timestamps:
             oldTimeString = timestamps[oldEpoch]['string']
