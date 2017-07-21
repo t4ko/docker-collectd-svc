@@ -294,12 +294,12 @@ class SVCPlugin(base.Base):
         self.logverbose("Loading and parsing the old files")
         old_stats = defaultdict(dict)
         if not (self.stats_history == self.time - self.interval):
+            for filename in oldDumpsList :
+                self.logdebug("Parsing old dump file : {}".format(filename))
+                statType, junk1, panelId, junk2, junk3 = filename.split('_')
+                old_stats[panelId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
             for nodeId in nodeList:
                 self.dumps[nodeId] = { 'nodes' : {}, 'mdisks' : {}, 'vdisks' : {}, 'sysid' : '' }
-                for filename in oldDumpsList :
-                    self.logdebug("Parsing old dump file : {}".format(filename))
-                    statType, junk1, panelId, junk2, junk3 = filename.split('_')
-                    old_stats[panelId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
 
                 #Nodes
                 if nodeId not in self.dumps[nodeId][nodes] :
