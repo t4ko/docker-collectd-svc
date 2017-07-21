@@ -293,6 +293,7 @@ class SVCPlugin(base.Base):
         # Load and parse previous files if they are available
         self.logverbose("Loading and parsing the old files")
         old_stats = defaultdict(dict)
+        allvdisks, allmdisks = set(), set()
         if not (self.stats_history == self.time - self.interval):
             for filename in oldDumpsList :
                 self.logdebug("Parsing old dump file : {}".format(filename))
@@ -310,6 +311,7 @@ class SVCPlugin(base.Base):
                 #Mdisks
                 for mdisk in old_stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'):
                     mdiskId = mdisk.get('id')
+                    allmdisks.add(mdiskId)
                     self.dumps[nodeId][mdisks][mdiskId] = {}
                     self.dumps[nodeId][mdisks][mdiskId]['old'] = {
                         'rb' : int(mdisk.get('rb')) * 512,
@@ -322,6 +324,7 @@ class SVCPlugin(base.Base):
                 #Vdisks
                 for vdisk in old_stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'):
                     vdiskId = vdisk.get('id')
+                    allvdisks.add(vdiskId)
                     self.dumps[nodeId][vdisks][vdiskId] = {}
                     self.dumps[nodeId][vdisks][vdiskId]['old'] = {
                         'ctw' : int(vdisk.get('ctw')), 
@@ -340,8 +343,9 @@ class SVCPlugin(base.Base):
                 for dumpType in  self.dumps[nodeId]:
                     if dumpType != "sysid":
                         for component in self.dumps[nodeId][dumpType]:
-                            self.dumps[nodeId][dumpType][component]['old'] = self.dumps[nodeId][dumpType][component]['new']
-                            del self.dumps[nodeId][dumpType][component]['new']
+                            if 'new' in self.dumps[nodeId][dumpType][component]:
+                                self.dumps[nodeId][dumpType][component]['old'] = self.dumps[nodeId][dumpType][component]['new']
+                                del self.dumps[nodeId][dumpType][component]['new']
 
 
         # Load and parse the current files 
@@ -369,6 +373,7 @@ class SVCPlugin(base.Base):
             #Mdisks
             for mdisk in stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'):
                 mdiskId = mdisk.get('id')
+                allmdisks.add(mdiskId)
                 if mdiskId not in self.dumps[nodeId][mdisks]:
                     self.dumps[nodeId][mdisks][mdiskId] = {}
                 self.dumps[nodeId][mdisks][mdisk.get('id')]['new'] = {
@@ -382,6 +387,7 @@ class SVCPlugin(base.Base):
             #Vdisks
             for vdisk in stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'):
                 vdiskId = vdisk.get('id')
+                allvdisks.add(vdiskId)
                 if vdiskId not in self.dumps[nodeId][vdisks]:
                     self.dumps[nodeId][vdisks][vdiskId] = {}
                 self.dumps[nodeId][vdisks][vdiskId]['new'] = {
@@ -430,6 +436,7 @@ class SVCPlugin(base.Base):
                 self.logverbose("Closing ssh connection")
                 self.ssh.close()
                 return
+            if splittedLine[nameIndex] not in allmdisks: continue
             mdiskList[splittedLine[nameIndex]] = { 
                 'mdiskGrpName' : splittedLine[mdisk_grp_nameIndex], 
                 'ro' : 0, 
@@ -447,6 +454,10 @@ class SVCPlugin(base.Base):
                 'b_rrp': 0,
                 'b_wrp': 0
             }
+        for mdisk in allmdisks:
+            if mdisk not in mdiskList:
+                for nodeId in nodeList:
+                    self.dumps[nodeId][mdisks].pop(mdisk, None)
         self.logverbose("Loaded {} entry in the mdisk list".format(len(mdiskList)))
 
         # Load the vdisk and their mdisk group
@@ -486,7 +497,7 @@ class SVCPlugin(base.Base):
             isFirst, vdisk_nameIndex, mdisk_grp_nameIndex = True, -1, -1
             for line_details in stdout_details:
                 splittedLine = line_details.split(':')
-                if isFirst:
+                if isFirst: 
                     isFirst = False
                     vdisk_nameIndex, mdisk_grp_nameIndex = splittedLine.index('vdisk_name'), splittedLine.index('mdisk_grp_name')
                     continue
@@ -497,6 +508,10 @@ class SVCPlugin(base.Base):
                     return
                 if splittedLine[vdisk_nameIndex] in manyMdiskgrp and vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] == '':
                     vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
+        for vdisk in allvdisks:
+            if vdisk not in vdiskList:
+                for nodeId in nodeList:
+                    self.dumps[nodeId][vdisks].pop(vdisk, None)
         self.logverbose("Loaded {} entry in the vdisk list".format(len(vdiskList)))
         if self.forcedTime == 0:
             self.logverbose("Closing ssh connection")
