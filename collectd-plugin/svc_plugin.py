@@ -49,7 +49,8 @@ class SVCPlugin(base.Base):
         base.Base.__init__(self)
         self.prefix = 'svc'
         self.ssh = None
-        self.stats_history = {}
+        self.stats_history = None
+        self.dumps = {}
         self.catchup = {}
         self.timezone = None
 
@@ -109,6 +110,7 @@ class SVCPlugin(base.Base):
         clusternode = "{}.node".format(self.cluster)
         clustermdsk = "{}.mdsk".format(self.cluster)
         clustervdsk = "{}.vdsk".format(self.cluster)
+        vdisks, mdisks, nodes = 'vdisks', 'mdisks', 'nodes'
 
         # Close previous ssh connections if still alive
         if self.ssh is not None and self.forcedTime == 0:
@@ -149,94 +151,6 @@ class SVCPlugin(base.Base):
             os.environ['TZ'] = self.timezone
             time.tzset()
             self.logverbose("Working timezone set to {} {}".format(os.environ['TZ'], time.strftime("%z", time.localtime())))
-
-        # Load the MdiskGrp names and their Mdisk from the svc cluster
-        self.logverbose("Loading the mdisk list")
-        mdiskGrpList = { }
-        mdiskList = { }
-        (success, stdout_mdsk) = self.check_command('lsmdisk -delim :')
-        if not success: return
-        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
-        for line in stdout_mdsk:
-            splittedLine = line.split(':')
-            if isFirst:
-                isFirst = False
-                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
-                continue
-            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
-                self.loginfo('The first line of the output for \'lsmdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
-                self.logverbose("Closing ssh connection")
-                self.ssh.close()
-                return
-            mdiskList[splittedLine[nameIndex]] = { 
-                'mdiskGrpName' : splittedLine[mdisk_grp_nameIndex], 
-                'ro' : 0, 
-                'wo' : 0, 
-                'rrp' : 0, 
-                'wrp' : 0 
-            }
-            mdiskGrpList[splittedLine[mdisk_grp_nameIndex]] = {
-                'ro' : 0, 
-                'wo' : 0, 
-                'rrp' : 0, 
-                'wrp' : 0,
-                'b_ro' : 0,
-                'b_wo' : 0,
-                'b_rrp': 0,
-                'b_wrp': 0
-            }
-        self.logverbose("Loaded {} entry in the mdisk list".format(len(mdiskList)))
-
-        # Load the vdisk and their mdisk group
-        self.logverbose("Loading the vdisk list")
-        vdiskList = {}
-        manyMdiskgrp = set()
-        (success, stdout_vdsk) = self.check_command('lsvdisk -delim :')
-        if not success: return
-        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
-        for line in stdout_vdsk:
-            splittedLine = line.split(':')
-            if isFirst:
-                isFirst = False
-                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
-                continue
-            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
-                self.loginfo('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
-                self.logverbose("Closing ssh connection")
-                self.ssh.close()
-                return
-            vdiskList[splittedLine[nameIndex]] = { 
-                'mdiskGrpName' : '', 
-                'ro' : 0, 
-                'wo' : 0, 
-                'rrp' : 0, 
-                'wrp' : 0 
-            }
-            if splittedLine[mdisk_grp_nameIndex] == 'many': # the vdisk is in several mdisk groups
-                manyMdiskgrp.add(splittedLine[nameIndex])
-            else: # the vdisk is in a single mdisk group
-                vdiskList[splittedLine[nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
-
-        if(len(manyMdiskgrp) > 0):
-            (success, stdout_details) = self.check_command('lsvdiskcopy -delim :')
-            if not success: return
-            self.logverbose("{} vdisks on many mdiskGrp, loading details from lsvdiskcopy".format(len(manyMdiskgrp)))
-            isFirst, vdisk_nameIndex, mdisk_grp_nameIndex = True, -1, -1
-            for line_details in stdout_details:
-                splittedLine = line_details.split(':')
-                if isFirst:
-                    isFirst = False
-                    vdisk_nameIndex, mdisk_grp_nameIndex = splittedLine.index('vdisk_name'), splittedLine.index('mdisk_grp_name')
-                    continue
-                if vdisk_nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
-                    self.loginfo('The first line of the output for \'lsvdiskcopy -delim :\' is missing \'vdisk_name\' or \'mdisk_grp_name\'')
-                    self.logverbose("Closing ssh connection")
-                    self.ssh.close()
-                    return
-                if splittedLine[vdisk_nameIndex] in manyMdiskgrp and vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] == '':
-                    vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
-        self.logverbose("Loaded {} entry in the vdisk list".format(len(vdiskList)))
-
 
 
 
@@ -324,10 +238,12 @@ class SVCPlugin(base.Base):
         else:
             oldTimeString = 'XXXXXX_XXXXXX'
 
+
         # Create the dumps directory if it does not exist yet
         dumpsFolder = '{}/svc-stats-dumps'.format(os.getcwd())
         if not os.path.exists(dumpsFolder):
             os.makedirs(dumpsFolder)
+
 
         # Check if the last available dumps have not already been collected
         dumpsList = os.listdir(dumpsFolder)
@@ -338,8 +254,8 @@ class SVCPlugin(base.Base):
                 self.ssh.close()
                 return
 
+
         # Check if files from previous stats are already in the directory
-        useOld = True
         oldFileDownloaded, oldFileAvailable = True, True
         oldDumpsList = set()
         self.logdebug("Before doing anything the dumps folder contains :\n {}".format(str(dumpsList)))
@@ -352,6 +268,7 @@ class SVCPlugin(base.Base):
                 if oldFileName not in dumpsList:
                     oldFileDownloaded = False
 
+
         # Download the file from the SVC cluster if they are available
         self.check_ssh()
         self.logverbose("Downloading the dumps with scp")
@@ -361,8 +278,8 @@ class SVCPlugin(base.Base):
         if not oldFileDownloaded:
             for oldFileName in oldDumpsList:
                 if oldFileName not in lsdumpsList:
-                    oldFileAvailable = False
-                    useOld = False
+                    self.loginfo("Stats dumps from previous interval are not available")
+                    return
         if not oldFileDownloaded and oldFileAvailable:
             self.logverbose("Downloading old and new dumps")
             self.logdebug("String passed to scp.get is : /dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString))
@@ -371,45 +288,220 @@ class SVCPlugin(base.Base):
             self.logverbose("Downloading new dumps")
             self.logdebug("String passed to scp.get is : /dumps/iostats/*{}".format(newTimeString))
             scp.get("/dumps/iostats/*{}".format(newTimeString), dumpsFolder)
-        if self.forcedTime == 0:
-            self.logverbose("Closing ssh connection")
-            self.ssh.close()
+
+
+        # Load and parse previous files if they are available
+        self.logverbose("Loading and parsing the old files")
+        old_stats = defaultdict(dict)
+        if not (self.stats_history == self.time - self.interval):
+            for nodeId in nodeList:
+                self.dumps[nodeId] = { 'nodes' : {}, 'mdisks' : {}, 'vdisks' : {}, 'sysid' : '' }
+                for filename in oldDumpsList :
+                    self.logdebug("Parsing old dump file : {}".format(filename))
+                    statType, junk1, panelId, junk2, junk3 = filename.split('_')
+                    old_stats[panelId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+
+                #Nodes
+                if nodeId not in self.dumps[nodeId][nodes] :
+                    self.dumps[nodeId][nodes] = { nodeId : {} }
+                self.dumps[nodeId][nodes][nodeId]['old'] = {
+                    'cpu' : int(old_stats[nodeId]['Nn'].find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy'))
+                }
+                #Mdisks
+                for mdisk in old_stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'):
+                    mdiskId = mdisk.get('id')
+                    self.dumps[nodeId][mdisks][mdiskId] = {}
+                    self.dumps[nodeId][mdisks][mdiskId]['old'] = {
+                        'rb' : int(mdisk.get('rb')) * 512,
+                        'ro' : int(mdisk.get('ro')),
+                        'wb' : int(mdisk.get('wb')) * 512,
+                        'wo' : int(mdisk.get('wo')),
+                        're' : int(mdisk.get('re')),
+                        'we' : int(mdisk.get('we'))
+                    }
+                #Vdisks
+                for vdisk in old_stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'):
+                    vdiskId = vdisk.get('id')
+                    self.dumps[nodeId][vdisks][vdiskId] = {}
+                    self.dumps[nodeId][vdisks][vdiskId]['old'] = {
+                        'ctw' : int(vdisk.get('ctw')), 
+                        'ctwwt' : int(vdisk.get('ctwwt')), 
+                        'ctwft' : int(vdisk.get('ctwft')), 
+                        'rl' : int(vdisk.get('rl')),
+                        'wl' : int(vdisk.get('wl')),
+                        'rb' : int(vdisk.get('rb')) * 512,
+                        'wb' : int(vdisk.get('wb')) * 512, 
+                        'ro' : int(vdisk.get('ro')),
+                        'wo' : int(vdisk.get('wo'))
+                    }
+        else: #Transfer new to old, to avoid parsing a file that has already been parsed
+            self.logverbose("Old files already parsed during previous collect")
+            for nodeId in self.dumps:
+                for dumpType in  self.dumps[nodeId]:
+                    if dumpType != "sysid":
+                        for component in self.dumps[nodeId][dumpType]:
+                            self.dumps[nodeId][dumpType][component]['old'] = self.dumps[nodeId][dumpType][component]['new']
+                            del self.dumps[nodeId][dumpType][component]['new']
+
 
         # Load and parse the current files 
         self.logverbose("Loading and parsing the last files")
         stats = defaultdict(dict)
+        dumps = defaultdict(dict)
         downloadedList = str(os.listdir(dumpsFolder))
         self.logdebug("Stats dumps directory contains : \n{}".format(downloadedList))
+        typedict = {'Nn': 'nodes', 'Nm' : 'mdisks', 'Nv' : 'vdisks'}
         for nodeId in nodeList:
             for statType in ['Nn', 'Nv', 'Nm']:
                 filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
-                if filename in downloadedList:
-                    self.logdebug("Parsing dump file : {}".format(filename))
-                    stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
-                else:
+                if filename not in downloadedList:
                     self.loginfo("Dump not downloaded, could not collect stats : {}".format(filename))
                     return
-            stats[nodeId]['sysid'] = stats[nodeId]['Nn'].get('id')
-            self.logdebug("{} has sysid {}".format(nodeId, stats[nodeId]['sysid']))
-        self.logverbose("Finish dl and parsing new files")
+                self.logdebug("Parsing dump file : {}".format(filename))
+                stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+            #Nodes
+            self.dumps[nodeId]['sysid'] = stats[nodeId]['Nn'].get('id')
+            if nodeId not in self.dumps[nodeId][nodes] :
+                self.dumps[nodeId][nodes][nodeId] = {}
+            self.dumps[nodeId]['nodes'][nodeId]['new'] = {
+                'cpu' : int(stats[nodeId]['Nn'].find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy'))
+            }
+            #Mdisks
+            for mdisk in stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'):
+                mdiskId = mdisk.get('id')
+                if mdiskId not in self.dumps[nodeId][mdisks]:
+                    self.dumps[nodeId][mdisks][mdiskId] = {}
+                self.dumps[nodeId][mdisks][mdisk.get('id')]['new'] = {
+                    'rb' : int(mdisk.get('rb')) * 512,
+                    'wb' : int(mdisk.get('wb')) * 512,
+                    'ro' : int(mdisk.get('ro')),
+                    'wo' : int(mdisk.get('wo')),
+                    're' : int(mdisk.get('re')),
+                    'we' : int(mdisk.get('we'))
+                }
+            #Vdisks
+            for vdisk in stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'):
+                vdiskId = vdisk.get('id')
+                if vdiskId not in self.dumps[nodeId][vdisks]:
+                    self.dumps[nodeId][vdisks][vdiskId] = {}
+                self.dumps[nodeId][vdisks][vdiskId]['new'] = {
+                    'ctw' : int(vdisk.get('ctw')), 
+                    'ctwwt' : int(vdisk.get('ctwwt')), 
+                    'ctwft' : int(vdisk.get('ctwft')), 
+                    'rl' : int(vdisk.get('rl')),
+                    'wl' : int(vdisk.get('wl')),
+                    'rb' : int(vdisk.get('rb')) * 512,
+                    'wb' : int(vdisk.get('wb')) * 512, 
+                    'ro' : int(vdisk.get('ro')),
+                    'wo' : int(vdisk.get('wo'))
+                }
 
-        # Load and parse previous files if they are available
-        if useOld:
-            self.logverbose("Loading and parsing the old files")
-            old_stats = defaultdict(dict)
-            for nodeId in nodeList:
-                if not (nodeId in self.stats_history and self.stats_history[nodeId]['time'] == self.time - self.interval):            
-                    for filename in oldDumpsList :
-                        self.logdebug("Parsing old dump file : {}".format(filename))
-                        statType, junk1, nodeId, junk2, junk3 = filename.split('_')
-                        old_stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
-                    for panelId in nodeList:
-                        old_stats[panelId]['sysid'] = old_stats[panelId]['Nn'].get('id')
-                    break
+            self.logdebug("{} has sysid {}".format(nodeId, self.dumps[nodeId]['sysid']))
+        self.logverbose("Finish loading and parsing new files")
+        self.stats_history = self.time
 
         # Remove old stats files
         for filename in dumpsList:
             os.remove('{0}/{1}'.format(dumpsFolder, filename))
+
+
+
+
+
+        
+
+
+
+        # Load the MdiskGrp names and their Mdisk from the svc cluster
+        self.logverbose("Loading the mdisk list")
+        mdiskGrpList = { }
+        mdiskList = { }
+        (success, stdout_mdsk) = self.check_command('lsmdisk -delim :')
+        if not success: return
+        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
+        for line in stdout_mdsk:
+            splittedLine = line.split(':')
+            if isFirst:
+                isFirst = False
+                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
+                continue
+            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
+                self.loginfo('The first line of the output for \'lsmdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+                self.logverbose("Closing ssh connection")
+                self.ssh.close()
+                return
+            mdiskList[splittedLine[nameIndex]] = { 
+                'mdiskGrpName' : splittedLine[mdisk_grp_nameIndex], 
+                'ro' : 0, 
+                'wo' : 0, 
+                'rrp' : 0, 
+                'wrp' : 0 
+            }
+            mdiskGrpList[splittedLine[mdisk_grp_nameIndex]] = {
+                'ro' : 0, 
+                'wo' : 0, 
+                'rrp' : 0, 
+                'wrp' : 0,
+                'b_ro' : 0,
+                'b_wo' : 0,
+                'b_rrp': 0,
+                'b_wrp': 0
+            }
+        self.logverbose("Loaded {} entry in the mdisk list".format(len(mdiskList)))
+
+        # Load the vdisk and their mdisk group
+        self.logverbose("Loading the vdisk list")
+        vdiskList = {}
+        manyMdiskgrp = set()
+        (success, stdout_vdsk) = self.check_command('lsvdisk -delim :')
+        if not success: return
+        isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
+        for line in stdout_vdsk:
+            splittedLine = line.split(':')
+            if isFirst:
+                isFirst = False
+                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
+                continue
+            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
+                self.loginfo('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
+                self.logverbose("Closing ssh connection")
+                self.ssh.close()
+                return
+            vdiskList[splittedLine[nameIndex]] = { 
+                'mdiskGrpName' : '', 
+                'ro' : 0, 
+                'wo' : 0, 
+                'rrp' : 0, 
+                'wrp' : 0 
+            }
+            if splittedLine[mdisk_grp_nameIndex] == 'many': # the vdisk is in several mdisk groups
+                manyMdiskgrp.add(splittedLine[nameIndex])
+            else: # the vdisk is in a single mdisk group
+                vdiskList[splittedLine[nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
+
+        if(len(manyMdiskgrp) > 0):
+            (success, stdout_details) = self.check_command('lsvdiskcopy -delim :')
+            if not success: return
+            self.logverbose("{} vdisks on many mdiskGrp, loading details from lsvdiskcopy".format(len(manyMdiskgrp)))
+            isFirst, vdisk_nameIndex, mdisk_grp_nameIndex = True, -1, -1
+            for line_details in stdout_details:
+                splittedLine = line_details.split(':')
+                if isFirst:
+                    isFirst = False
+                    vdisk_nameIndex, mdisk_grp_nameIndex = splittedLine.index('vdisk_name'), splittedLine.index('mdisk_grp_name')
+                    continue
+                if vdisk_nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
+                    self.loginfo('The first line of the output for \'lsvdiskcopy -delim :\' is missing \'vdisk_name\' or \'mdisk_grp_name\'')
+                    self.logverbose("Closing ssh connection")
+                    self.ssh.close()
+                    return
+                if splittedLine[vdisk_nameIndex] in manyMdiskgrp and vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] == '':
+                    vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
+        self.logverbose("Loaded {} entry in the vdisk list".format(len(vdiskList)))
+        if self.forcedTime == 0:
+            self.logverbose("Closing ssh connection")
+            self.ssh.close()
+
 
 
 
@@ -425,54 +517,51 @@ class SVCPlugin(base.Base):
 
         # Initialize the structure for storing the collected data for nodes
         for nodeId in nodeList:
-            data[clusternode][stats[nodeId]['sysid']] = { 'gauge' : {} }
-            if useOld: #Metrics that needs previous stats to be calculated
-                data[clusternode][stats[nodeId]['sysid']]['gauge'] = {
-                    'read_response_time' : 0,
-                    'write_response_time' : 0,
-                    'write_cache_delay_percentage' : 0,
-                    'cpu_utilization' : 0,
-                    'backend_read_data_rate' : 0,
-                    'backend_read_io_rate' : 0,
-                    'backend_write_data_rate' : 0,
-                    'backend_write_io_rate' : 0,
-                    'read_data_rate' : 0, 
-                    'read_io_rate' : 0, 
-                    'write_data_rate' : 0, 
-                    'write_io_rate' : 0
-                }
+            data[clusternode][self.dumps[nodeId]['sysid']] = { 'gauge' : {} }
+            data[clusternode][self.dumps[nodeId]['sysid']]['gauge'] = {
+                'read_response_time' : 0,
+                'write_response_time' : 0,
+                'write_cache_delay_percentage' : 0,
+                'cpu_utilization' : 0,
+                'backend_read_data_rate' : 0,
+                'backend_read_io_rate' : 0,
+                'backend_write_data_rate' : 0,
+                'backend_write_io_rate' : 0,
+                'read_data_rate' : 0, 
+                'read_io_rate' : 0, 
+                'write_data_rate' : 0, 
+                'write_io_rate' : 0
+            }
 
         # Initialize the structure for storing the collected data for mdisks
         for mdisk in mdiskList:
             data[clustermdsk][mdiskList[mdisk]['mdiskGrpName']] = { 'gauge' : {} }
-            if useOld: #Metrics that needs previous stats to be calculated
-                data[clustermdsk][mdiskList[mdisk]['mdiskGrpName']]['gauge'] = {
-                    'backend_read_response_time' : 0,
-                    'backend_write_response_time' : 0,
-                    'read_response_time' : 0,
-                    'write_response_time' : 0,
-                    'backend_read_data_rate' : 0,
-                    'backend_read_io_rate' : 0,
-                    'backend_write_data_rate' : 0,
-                    'backend_write_io_rate' : 0,
-                    'read_data_rate' : 0, 
-                    'read_io_rate' : 0, 
-                    'write_data_rate' : 0, 
-                    'write_io_rate' : 0
-                }
+            data[clustermdsk][mdiskList[mdisk]['mdiskGrpName']]['gauge'] = {
+                'backend_read_response_time' : 0,
+                'backend_write_response_time' : 0,
+                'read_response_time' : 0,
+                'write_response_time' : 0,
+                'backend_read_data_rate' : 0,
+                'backend_read_io_rate' : 0,
+                'backend_write_data_rate' : 0,
+                'backend_write_io_rate' : 0,
+                'read_data_rate' : 0, 
+                'read_io_rate' : 0, 
+                'write_data_rate' : 0, 
+                'write_io_rate' : 0
+            }
 
         # Initialize the structure for storing the collected data for vdisks
         for vdisk in vdiskList:
             data[clustervdsk][vdisk] = { 'gauge' : {} }
-            if useOld: #Metrics that needs previous stats to be calculated
-                data[clustervdsk][vdisk]['gauge'] = {
-                    'read_response_time' : 0, 
-                    'write_response_time' : 0,
-                    'read_io_rate' : 0,
-                    'write_io_rate' : 0,
-                    'read_data_rate' : 0,
-                    'write_data_rate' : 0
-                }
+            data[clustervdsk][vdisk]['gauge'] = {
+                'read_response_time' : 0, 
+                'write_response_time' : 0,
+                'read_io_rate' : 0,
+                'write_io_rate' : 0,
+                'read_data_rate' : 0,
+                'write_data_rate' : 0
+            }
 
 
 
@@ -485,88 +574,53 @@ class SVCPlugin(base.Base):
         self.logverbose("Starting gathering metrics")
         ## Iterate over the nodes to analyse their stats files
         for nodeId in nodeList:
-            node_sysid = stats[nodeId]['sysid'] #for lisibility
-            node_vdisks = stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk')
-            node_mdisks = stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk')
+            node_sysid = self.dumps[nodeId]['sysid']
 
-            if useOld:
-                if nodeId in self.stats_history and self.stats_history[nodeId]['time'] == self.time - self.interval:
-                    old_node_vdisks = self.stats_history[nodeId]['vdisks']
-                    old_node_mdisks = self.stats_history[nodeId]['mdisks']
-                    old_node_cpu = self.stats_history[nodeId]['cpu']
-                else:
-                    old_node_vdisks = set(old_stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'))
-                    old_node_mdisks = set(old_stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'))
-                    old_node_cpu = int(old_stats[nodeId]['Nn'].find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy'))
+## Metrics for nodes
+# CPU utilization : Nn File > cpu > busy (Extract the counter)
+# backend_read_data_rate : Nm file > mdsk > rb (512 bytes sector write)
+# backend_read_io_rate : Nm file > mdsk > ro (read operation)
+# backend_write_data_rate : Nm file > mdsk > wb (512 bytes blocks write)
+# backend_write_io_rate : Nm file > mdsk > wo (write operation)
+# read_response_time : Nm file > mdsk > ure (read external response time (microsecond))
+# write_response_time : Nm file > mdsk > uwe (write external response time (microsecond))
+            total_rrp, total_ro, total_wrp, total_wo = 0, 0, 0, 0
+            if len(self.dumps[nodeId][nodes][nodeId]) == 2:
+                data[clusternode][node_sysid]['gauge']['cpu_utilization'] = (self.dumps[nodeId][nodes][nodeId]['new']['cpu'] - self.dumps[nodeId][nodes][nodeId]['old']['cpu'])/(self.interval * 10) #busy time / total time (milliseconds)
 
+            for mdisk in self.dumps[nodeId][mdisks]:
+                if len(self.dumps[nodeId][mdisks][mdisk]) == 2:
+                    data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] += self.dumps[nodeId][mdisks][mdisk]['new']['rb'] - self.dumps[nodeId][mdisks][mdisk]['old']['rb']
+                    data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] += self.dumps[nodeId][mdisks][mdisk]['new']['ro'] - self.dumps[nodeId][mdisks][mdisk]['old']['ro']
+                    data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] += self.dumps[nodeId][mdisks][mdisk]['new']['wb'] - self.dumps[nodeId][mdisks][mdisk]['old']['wb']
+                    data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] += self.dumps[nodeId][mdisks][mdisk]['new']['wo'] - self.dumps[nodeId][mdisks][mdisk]['old']['wo']
 
-        # CPU utilization : Nn File > cpu > busy (Extract the counter)
-        # read_data_rate : Nm file > mdsk > rb (512 bytes sector write)
-        # read_io_rate : Nm file > mdsk > ro (read operation)
-        # write_data_rate : Nm file > mdsk > wb (512 bytes blocks write)
-        # write_io_rate : Nm file > mdsk > wo (write operation)
-        # read_response_time : Nm file > mdsk > ure (read external response time (microsecond))
-        # write_response_time : Nm file > mdsk > uwe (write external response time (microsecond))
-        
-            total_rrp, total_ro, total_wrp, total_wo, mdisks_count = 0, 0, 0, 0, len(node_mdisks)
-            if useOld:
+                    total_ro += self.dumps[nodeId][mdisks][mdisk]['new']['ro'] - self.dumps[nodeId][mdisks][mdisk]['old']['ro']
+                    total_wo += self.dumps[nodeId][mdisks][mdisk]['new']['wo'] - self.dumps[nodeId][mdisks][mdisk]['old']['wo']
+                    total_rrp += self.dumps[nodeId][mdisks][mdisk]['new']['re'] - self.dumps[nodeId][mdisks][mdisk]['old']['re']
+                    total_wrp += self.dumps[nodeId][mdisks][mdisk]['new']['we'] - self.dumps[nodeId][mdisks][mdisk]['old']['we']
 
-                node_cpu = int(stats[nodeId]['Nn'].find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy'))
-                data[clusternode][node_sysid]['gauge']['cpu_utilization'] = (node_cpu - old_node_cpu)/(self.interval * 10) #busy time / total time (milliseconds)
-
-                for mdisk in node_mdisks:
-                    data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] += (int(mdisk.get('rb')) * 512)
-                    data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] += int(mdisk.get('ro'))
-                    data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] += (int(mdisk.get('wb')) * 512)
-                    data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] += int(mdisk.get('wo'))
-
-                    total_ro += int(mdisk.get('ro'))
-                    total_wo += int(mdisk.get('wo'))
-                    total_rrp += int(mdisk.get('re'))
-                    total_wrp += int(mdisk.get('we'))
-
-                for mdisk in old_node_mdisks:
-                    data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] -= (int(mdisk.get('rb')) * 512)
-                    data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] -= int(mdisk.get('ro'))
-                    data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] -= (int(mdisk.get('wb')) * 512)
-                    data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] -= int(mdisk.get('wo'))
-
-                    total_ro -= int(mdisk.get('ro'))
-                    total_wo -= int(mdisk.get('wo'))
-                    total_rrp -= int(mdisk.get('re'))
-                    total_wrp -= int(mdisk.get('we'))
-
-                if total_ro == 0: #avoid division by 0
-                    data[clusternode][node_sysid]['gauge']['read_response_time'] = 0
-                else :
-                    data[clusternode][node_sysid]['gauge']['read_response_time'] = float(total_rrp/total_ro)
-                if total_wo == 0: #avoid division by 0
-                    data[clusternode][node_sysid]['gauge']['write_response_time'] = 0
-                else :
-                    data[clusternode][node_sysid]['gauge']['write_response_time'] =float(total_wrp/total_wo)
+            if total_ro == 0: #avoid division by 0
+                data[clusternode][node_sysid]['gauge']['read_response_time'] = 0
+            else :
+                data[clusternode][node_sysid]['gauge']['read_response_time'] = float(total_rrp/total_ro)
+            if total_wo == 0: #avoid division by 0
+                data[clusternode][node_sysid]['gauge']['write_response_time'] = 0
+            else :
+                data[clusternode][node_sysid]['gauge']['write_response_time'] =float(total_wrp/total_wo)
 
 
 # write_cache_delay_percentage : Nv file > vdsk > ctwft + ctwwt (flush-through + write through)
 # write_cache_delay_percentage not possible without accessing previous data, suggest using write_cache_delay_rate
             write_cache_delay_percentage, ctw, ctwft, ctwwt = 0, 0, 0, 0
-            if useOld:
-                oldVdiskList = {}
-                for old_vdisk in old_node_vdisks:
-                    oldVdiskList[old_vdisk.get('idx')] = { 
-                        'ctw' : old_vdisk.get('ctw'), 
-                        'ctwwt' : old_vdisk.get('ctwwt'), 
-                        'ctwft' : old_vdisk.get('ctwft') 
-                    }
-                for vdisk in node_vdisks:
-                    idx = vdisk.get('idx')
-                    if idx in oldVdiskList:
-                        ctw += int(vdisk.get('ctw')) - int(oldVdiskList[idx]['ctw'])
-                        ctwft += int(vdisk.get('ctwft')) - int(oldVdiskList[idx]['ctwft'])
-                        ctwwt += int(vdisk.get('ctwwt')) - int(oldVdiskList[idx]['ctwwt'])
-
-                if ctw > 0:
-                    write_cache_delay_percentage = ( ctwft + ctwwt ) / ctw
-                data[clusternode][node_sysid]['gauge']['write_cache_delay_percentage'] = write_cache_delay_percentage
+            for vdisk in self.dumps[nodeId][vdisks]:
+                if len(self.dumps[nodeId][vdisks][vdisk]) == 2:
+                    ctw += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctw']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctw'])
+                    ctwft += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwft']) - int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwft'])
+                    ctwwt += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwwt']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctwwt'])
+            if ctw > 0:
+                write_cache_delay_percentage = ( ctwft + ctwwt ) / ctw
+            data[clusternode][node_sysid]['gauge']['write_cache_delay_percentage'] = write_cache_delay_percentage
 
 
 
@@ -581,6 +635,12 @@ class SVCPlugin(base.Base):
 # read_io_rate : Nv file > vdsk > ro (read operation)
 # write_data_rate : Nv file > vdsk > ctws (512 bytes blocks write)
 # write_io_rate : Nv file > vdsk > wo (write operation)
+# backend_read_data_rate : Nm file > mdsk > rb (512 bytes blocks read)
+# backend_read_io_rate : Nm file > mdsk > ro (read operation)
+# backend_write_data_rate : Nm file > mdsk > wb (512 bytes blocks write)
+# backend_write_io_rate : Nm file > mdsk > wo (write operation) 
+# backend_read_response_time
+# backend_write_response_time
 
 ## Metrics for vdisks
 # read_io_rate Nv > vdsk > ro
@@ -590,208 +650,127 @@ class SVCPlugin(base.Base):
 # read_response_time : Nv file > vdsk > rl
 # write_response_time : Nv file > vdsk > wl
 
-            if useOld:
-                for vdisk in node_vdisks:
-                    vdiskId = vdisk.get('id')
+            for vdisk in self.dumps[nodeId][vdisks]:
+                if len(self.dumps[nodeId][vdisks][vdisk]) == 2: 
+                    mdiskGrp = vdiskList[vdisk]['mdiskGrpName']
 
-                    if(vdiskId in vdiskList): 
-                        mdiskGrp = vdiskList[vdiskId]['mdiskGrpName']
-                        rb, wb, ro, wo = int(vdisk.get('rb')) * 512 , int(vdisk.get('wb')) * 512 , int(vdisk.get('ro')), int(vdisk.get('wo'))
+                    #node
+                    data[clusternode][node_sysid]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
+                    data[clusternode][node_sysid]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
+                    data[clusternode][node_sysid]['gauge']['write_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wb'] - self.dumps[nodeId][vdisks][vdisk]['old']['wb']
+                    data[clusternode][node_sysid]['gauge']['write_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
 
-                        #node
-                        data[clusternode][node_sysid]['gauge']['read_data_rate'] += rb
-                        data[clusternode][node_sysid]['gauge']['read_io_rate'] += ro
-                        data[clusternode][node_sysid]['gauge']['write_data_rate'] += wb
-                        data[clusternode][node_sysid]['gauge']['write_io_rate'] += wo
+                    #mdisk
+                    data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
+                    data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
+                    data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wb'] - self.dumps[nodeId][vdisks][vdisk]['old']['wb']
+                    data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
 
-                        #mdisk
-                        data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] += rb
-                        data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] += ro
-                        data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] += wb
-                        data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] += wo
+                    #vdisk
+                    data[clustervdsk][vdisk]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
+                    data[clustervdsk][vdisk]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
+                    data[clustervdsk][vdisk]['gauge']['write_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wb'] - self.dumps[nodeId][vdisks][vdisk]['old']['wb']
+                    data[clustervdsk][vdisk]['gauge']['write_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
 
-                        #vdisk
-                        data[clustervdsk][vdiskId]['gauge']['read_data_rate'] += rb
-                        data[clustervdsk][vdiskId]['gauge']['write_data_rate'] += wb
-                        data[clustervdsk][vdiskId]['gauge']['read_io_rate'] += ro
-                        data[clustervdsk][vdiskId]['gauge']['write_io_rate'] += wo
+                    vdiskList[vdisk]['ro'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
+                    vdiskList[vdisk]['wo']  += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
+                    vdiskList[vdisk]['rrp']  += self.dumps[nodeId][vdisks][vdisk]['new']['rl'] - self.dumps[nodeId][vdisks][vdisk]['old']['rl']
+                    vdiskList[vdisk]['wrp']  += self.dumps[nodeId][vdisks][vdisk]['new']['wl'] - self.dumps[nodeId][vdisks][vdisk]['old']['wl']
 
-                        vdiskList[vdiskId]['ro'] += ro
-                        vdiskList[vdiskId]['wo']  += wo
-                        vdiskList[vdiskId]['rrp']  += int(vdisk.get('rl'))
-                        vdiskList[vdiskId]['wrp']  += int(vdisk.get('wl'))
+            for mdisk in self.dumps[nodeId][mdisks]:
+                if len(self.dumps[nodeId][mdisks][mdisk]) == 2:
+                    mdiskGrp = mdiskList[mdisk]['mdiskGrpName']
 
+                    data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] += self.dumps[nodeId][mdisks][mdisk]['new']['rb'] - self.dumps[nodeId][mdisks][mdisk]['old']['rb']
+                    data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] += self.dumps[nodeId][mdisks][mdisk]['new']['ro'] - self.dumps[nodeId][mdisks][mdisk]['old']['ro']
+                    data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] += self.dumps[nodeId][mdisks][mdisk]['new']['wb'] - self.dumps[nodeId][mdisks][mdisk]['old']['wb']
+                    data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] += self.dumps[nodeId][mdisks][mdisk]['new']['wo'] - self.dumps[nodeId][mdisks][mdisk]['old']['wo']
                 
-                for vdisk in old_node_vdisks:
-                    vdiskId = vdisk.get('id')
-                    if(vdiskId in vdiskList):
-                        mdiskGrp = vdiskList[vdiskId]['mdiskGrpName']
-                        rb, wb, ro, wo = int(vdisk.get('rb')) * 512 , int(vdisk.get('wb')) * 512 , int(vdisk.get('ro')), int(vdisk.get('wo'))
-
-                        #node
-                        data[clusternode][node_sysid]['gauge']['read_data_rate'] -= rb
-                        data[clusternode][node_sysid]['gauge']['read_io_rate'] -= ro
-                        data[clusternode][node_sysid]['gauge']['write_data_rate'] -= wb
-                        data[clusternode][node_sysid]['gauge']['write_io_rate'] -= wo
-
-                        #mdisk
-                        data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] -= rb
-                        data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] -= ro
-                        data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] -= wb
-                        data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] -= wo
-
-                        #vdisk
-                        data[clustervdsk][vdiskId]['gauge']['read_data_rate'] -= rb
-                        data[clustervdsk][vdiskId]['gauge']['write_data_rate'] -= wb
-                        data[clustervdsk][vdiskId]['gauge']['read_io_rate'] -= ro
-                        data[clustervdsk][vdiskId]['gauge']['write_io_rate'] -= wo
-
-                        vdiskList[vdiskId]['ro'] -= ro
-                        vdiskList[vdiskId]['wo']  -= wo
-                        vdiskList[vdiskId]['rrp']  -= int(vdisk.get('rl'))
-                        vdiskList[vdiskId]['wrp']  -= int(vdisk.get('wl'))
-
-# backend_read_data_rate : Nm file > mdsk > rb (512 bytes blocks read)
-# backend_read_io_rate : Nm file > mdsk > ro (read operation)
-# backend_write_data_rate : Nm file > mdsk > wb (512 bytes blocks write)
-# backend_write_io_rate : Nm file > mdsk > wo (write operation) 
-                for mdisk in node_mdisks:
-                    mdiskid = mdisk.get('id')
-                    if(mdiskid in mdiskList):
-                        mdiskGrp = mdiskList[mdiskid]['mdiskGrpName']
-                        rb, wb, ro, wo = int(mdisk.get('rb')) * 512 , int(mdisk.get('wb')) * 512 , int(mdisk.get('ro')), int(mdisk.get('wo'))
-
-                        data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] += rb
-                        data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] += ro
-                        data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] += wb
-                        data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] += wo
-                    
-                        mdiskList[mdiskid]['ro'] += ro
-                        mdiskList[mdiskid]['wo']  += wo
-                        mdiskList[mdiskid]['rrp']  += int(mdisk.get('re'))
-                        mdiskList[mdiskid]['wrp']  += int(mdisk.get('we'))
-
-# backend_read_response_time
-# backend_write_response_time
-                for mdisk in old_node_mdisks:
-                    mdiskid = mdisk.get('id')
-                    if(mdiskid in mdiskList):
-                        mdiskGrp = mdiskList[mdiskid]['mdiskGrpName']
-                        rb, wb, ro, wo = int(mdisk.get('rb')) * 512 , int(mdisk.get('wb')) * 512 , int(mdisk.get('ro')), int(mdisk.get('wo'))
-
-                        data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] -= rb
-                        data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] -= ro
-                        data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] -= wb
-                        data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] -= wo
-
-                        mdiskList[mdiskid]['ro'] -= int(mdisk.get('ro'))
-                        mdiskList[mdiskid]['wo']  -= int(mdisk.get('wo'))
-                        mdiskList[mdiskid]['rrp']  -= int(mdisk.get('re'))
-                        mdiskList[mdiskid]['wrp']  -= int(mdisk.get('we'))
-
-                if nodeId not in self.stats_history:
-                    self.stats_history[nodeId] = {}
-                self.stats_history[nodeId]['time'] = self.time
-                self.stats_history[nodeId]['sysid'] = node_sysid
-                self.stats_history[nodeId]['vdisks'] = node_vdisks
-                self.stats_history[nodeId]['mdisks'] = node_mdisks
-                self.stats_history[nodeId]['cpu'] = node_cpu
+                    mdiskList[mdisk]['ro'] += self.dumps[nodeId][mdisks][mdisk]['new']['ro'] - self.dumps[nodeId][mdisks][mdisk]['old']['ro']
+                    mdiskList[mdisk]['wo']  += self.dumps[nodeId][mdisks][mdisk]['new']['wo'] - self.dumps[nodeId][mdisks][mdisk]['old']['wo']
+                    mdiskList[mdisk]['rrp']  += self.dumps[nodeId][mdisks][mdisk]['new']['re'] - self.dumps[nodeId][mdisks][mdisk]['old']['re']
+                    mdiskList[mdisk]['wrp']  += self.dumps[nodeId][mdisks][mdisk]['new']['we'] - self.dumps[nodeId][mdisks][mdisk]['old']['we']
 
 
 # Make rates out of counters and remove unnecessary precision
-        for node_sysid in data[clusternode]:
-            if useOld:
-                data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['read_data_rate'] = int(data[clusternode][node_sysid]['gauge']['read_data_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['read_io_rate'] = int(data[clusternode][node_sysid]['gauge']['read_io_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['write_data_rate'] = int(data[clusternode][node_sysid]['gauge']['write_data_rate'] / self.interval)
-                data[clusternode][node_sysid]['gauge']['write_io_rate'] = int(data[clusternode][node_sysid]['gauge']['write_io_rate'] / self.interval)
+        for node_sysid in data[clusternode]: # node
+            data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_write_data_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_write_io_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['read_data_rate'] = int(data[clusternode][node_sysid]['gauge']['read_data_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['read_io_rate'] = int(data[clusternode][node_sysid]['gauge']['read_io_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['write_data_rate'] = int(data[clusternode][node_sysid]['gauge']['write_data_rate'] / self.interval)
+            data[clusternode][node_sysid]['gauge']['write_io_rate'] = int(data[clusternode][node_sysid]['gauge']['write_io_rate'] / self.interval)
 
-        for mdiskGrp in data[clustermdsk]:
-            #mdisk
-            if useOld:
-                data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] / self.interval)
-                data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] / self.interval)
+        for mdiskGrp in data[clustermdsk]: #mdisk
+            data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_read_data_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_read_io_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_write_data_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] = int( data[clustermdsk][mdiskGrp]['gauge']['backend_write_io_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] / self.interval)
+            data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] = int(data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] / self.interval)
 
-        for vdiskId in data[clustervdsk]:
-            #vdisk
-            if useOld:
-                data[clustervdsk][vdiskId]['gauge']['read_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_data_rate'] / self.interval)
-                data[clustervdsk][vdiskId]['gauge']['write_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_data_rate'] / self.interval)
-                data[clustervdsk][vdiskId]['gauge']['read_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_io_rate'] / self.interval)
-                data[clustervdsk][vdiskId]['gauge']['write_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_io_rate'] / self.interval)
+        for vdiskId in data[clustervdsk]: #vdisk
+            data[clustervdsk][vdiskId]['gauge']['read_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_data_rate'] / self.interval)
+            data[clustervdsk][vdiskId]['gauge']['write_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_data_rate'] / self.interval)
+            data[clustervdsk][vdiskId]['gauge']['read_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_io_rate'] / self.interval)
+            data[clustervdsk][vdiskId]['gauge']['write_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_io_rate'] / self.interval)
 
-
-
-
-
-## Metrics for vdisks
-
-# Frontend latency
-# Aggregate metrics of individual mdisks by mdiskGrp
-        if useOld:
-            for vdisk in vdiskList: 
-                mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['ro'] += vdiskList[vdisk]['ro']
-                mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['wo'] += vdiskList[vdisk]['wo']
-                mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['rrp'] += vdiskList[vdisk]['rrp']
-                mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['wrp'] += vdiskList[vdisk]['wrp']
-                if vdiskList[vdisk]['ro'] == 0:
-                    data[clustervdsk][vdisk]['gauge']['read_response_time'] += float(0)
-                else :
-                    data[clustervdsk][vdisk]['gauge']['read_response_time'] += vdiskList[vdisk]['rrp'] / vdiskList[vdisk]['ro']
-                if vdiskList[vdisk]['wo'] == 0:
-                    data[clustervdsk][vdisk]['gauge']['write_response_time'] += float(0)
-                else : 
-                    data[clustervdsk][vdisk]['gauge']['write_response_time'] += vdiskList[vdisk]['wrp'] / vdiskList[vdisk]['wo']
-
-        # Aggregate metrics of individual mdisks by mdiskGrg
-            for mdisk in mdiskList: 
-                mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_ro'] += mdiskList[mdisk]['ro']
-                mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_wo'] += mdiskList[mdisk]['wo']
-                mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_rrp'] += mdiskList[mdisk]['rrp']
-                mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_wrp'] += mdiskList[mdisk]['wrp']
-
-        # Get average response time by IO (total response time / numbers of IO)
-
+# Response time
+# Aggregate metrics of individual mdisk by mdiskGrp
+        # Frontend latency    
+        for vdisk in vdiskList: 
+            mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['ro'] += vdiskList[vdisk]['ro']
+            mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['wo'] += vdiskList[vdisk]['wo']
+            mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['rrp'] += vdiskList[vdisk]['rrp']
+            mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['wrp'] += vdiskList[vdisk]['wrp']
+            if vdiskList[vdisk]['ro'] == 0:
+                data[clustervdsk][vdisk]['gauge']['read_response_time'] += float(0)
+            else :
+                data[clustervdsk][vdisk]['gauge']['read_response_time'] += vdiskList[vdisk]['rrp'] / vdiskList[vdisk]['ro']
+            if vdiskList[vdisk]['wo'] == 0:
+                data[clustervdsk][vdisk]['gauge']['write_response_time'] += float(0)
+            else : 
+                data[clustervdsk][vdisk]['gauge']['write_response_time'] += vdiskList[vdisk]['wrp'] / vdiskList[vdisk]['wo']
+        # Aggregate metrics of individual mdisk by mdiskGrp
+        for mdisk in mdiskList: 
+            mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_ro'] += mdiskList[mdisk]['ro']
+            mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_wo'] += mdiskList[mdisk]['wo']
+            mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_rrp'] += mdiskList[mdisk]['rrp']
+            mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_wrp'] += mdiskList[mdisk]['wrp']
+# Get average response time by IO (total response time / numbers of IO)
 # Backend latency
-            for mdiskGrp in mdiskGrpList:
-                if mdiskGrpList[mdiskGrp]['b_ro'] == 0: #avoid division by 0
-                    data[clustermdsk][mdiskGrp]['gauge']['backend_read_response_time'] += float(0)
-                else :
-                    data[clustermdsk][mdiskGrp]['gauge']['backend_read_response_time'] += float(mdiskGrpList[mdiskGrp]['b_rrp']/mdiskGrpList[mdiskGrp]['b_ro'])
-                if mdiskGrpList[mdiskGrp]['b_wo'] == 0: #avoid division by 0
-                    data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += float(0)
-                else :
-                    data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += float(mdiskGrpList[mdiskGrp]['b_wrp']/mdiskGrpList[mdiskGrp]['b_wo'])
-
+        for mdiskGrp in mdiskGrpList:
+            if mdiskGrpList[mdiskGrp]['b_ro'] == 0: #avoid division by 0
+                data[clustermdsk][mdiskGrp]['gauge']['backend_read_response_time'] += float(0)
+            else :
+                data[clustermdsk][mdiskGrp]['gauge']['backend_read_response_time'] += float(mdiskGrpList[mdiskGrp]['b_rrp']/mdiskGrpList[mdiskGrp]['b_ro'])
+            if mdiskGrpList[mdiskGrp]['b_wo'] == 0: #avoid division by 0
+                data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += float(0)
+            else :
+                data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += float(mdiskGrpList[mdiskGrp]['b_wrp']/mdiskGrpList[mdiskGrp]['b_wo'])
 # Frontend latency
-                if mdiskGrpList[mdiskGrp]['ro'] == 0: #avoid division by 0
-                    data[clustermdsk][mdiskGrp]['gauge']['read_response_time'] += float(0)
-                else :
-                    data[clustermdsk][mdiskGrp]['gauge']['read_response_time'] += float(mdiskGrpList[mdiskGrp]['rrp']/mdiskGrpList[mdiskGrp]['ro'])
-                if mdiskGrpList[mdiskGrp]['wo'] == 0: #avoid division by 0
-                    data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += float(0)
-                else :
-                    data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += float(mdiskGrpList[mdiskGrp]['wrp']/mdiskGrpList[mdiskGrp]['wo'])
+            if mdiskGrpList[mdiskGrp]['ro'] == 0: #avoid division by 0
+                data[clustermdsk][mdiskGrp]['gauge']['read_response_time'] += float(0)
+            else :
+                data[clustermdsk][mdiskGrp]['gauge']['read_response_time'] += float(mdiskGrpList[mdiskGrp]['rrp']/mdiskGrpList[mdiskGrp]['ro'])
+            if mdiskGrpList[mdiskGrp]['wo'] == 0: #avoid division by 0
+                data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += float(0)
+            else :
+                data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += float(mdiskGrpList[mdiskGrp]['wrp']/mdiskGrpList[mdiskGrp]['wo'])
+
+
+
+
+
+
+
+
+
         self.logverbose("Finished gathering metrics")
-
-
-
-
-
-
-
-
-	
         return data
 
 try:
