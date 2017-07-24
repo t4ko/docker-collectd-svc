@@ -16,17 +16,17 @@
 # 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 #
 # Authors:
-#   Ricardo Rocha <ricardo@catalyst.net.nz>
+#   Lucas Tronel <lucas.tronel@gmail.com>
 #
 # About this plugin:
-#   This plugin collects information regarding Ceph pools.
+#   This plugin collects information regarding IBM SVC Clusters.
 #
 # collectd:
 #   http://collectd.org
 # collectd-python:
 #   http://collectd.org/documentation/manpages/collectd-python.5.shtml
-# ceph pools:
-#   http://ceph.com/docs/master/rados/operations/pools/
+# IBM SVC Clusters:
+#   https://www.ibm.com/systems/storage/software/virtualization/svc/
 #
 
 import collectd
@@ -456,6 +456,7 @@ class SVCPlugin(base.Base):
             }
         for mdisk in allmdisks:
             if mdisk not in mdiskList:
+                self.logdebug("Mdisk {} found in dump file is not in lsmdisk".format(mdisk))
                 for nodeId in nodeList:
                     self.dumps[nodeId][mdisks].pop(mdisk, None)
         self.logverbose("Loaded {} entry in the mdisk list".format(len(mdiskList)))
@@ -510,6 +511,7 @@ class SVCPlugin(base.Base):
                     vdiskList[splittedLine[vdisk_nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
         for vdisk in allvdisks:
             if vdisk not in vdiskList:
+                self.logdebug("Vdisk {} found in dump file is not in lsvdisk".format(vdisk))
                 for nodeId in nodeList:
                     self.dumps[nodeId][vdisks].pop(vdisk, None)
         self.logverbose("Loaded {} entry in the vdisk list".format(len(vdiskList)))
