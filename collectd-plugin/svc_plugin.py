@@ -295,13 +295,14 @@ class SVCPlugin(base.Base):
         old_stats = defaultdict(dict)
         allvdisks, allmdisks = set(), set()
         if not (self.stats_history == self.time - self.interval):
+            # Parse the xml files
             for filename in oldDumpsList :
                 self.logdebug("Parsing old dump file : {}".format(filename))
                 statType, junk1, panelId, junk2, junk3 = filename.split('_')
                 old_stats[panelId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+            # Load relevant xml content in dict
             for nodeId in nodeList:
                 self.dumps[nodeId] = { 'nodes' : {}, 'mdisks' : {}, 'vdisks' : {}, 'sysid' : '' }
-
                 #Nodes
                 if nodeId not in self.dumps[nodeId][nodes] :
                     self.dumps[nodeId][nodes] = { nodeId : {} }
@@ -338,7 +339,7 @@ class SVCPlugin(base.Base):
                         'wo' : int(vdisk.get('wo'))
                     }
         else: #Transfer new to old, to avoid parsing a file that has already been parsed
-            self.logverbose("Old files already parsed during previous collect")
+            self.logverbose("Old files has already been parsed during previous collect")
             for nodeId in self.dumps:
                 for dumpType in  self.dumps[nodeId]:
                     if dumpType != "sysid":
@@ -354,8 +355,8 @@ class SVCPlugin(base.Base):
         dumps = defaultdict(dict)
         downloadedList = str(os.listdir(dumpsFolder))
         self.logdebug("Stats dumps directory contains : \n{}".format(downloadedList))
-        typedict = {'Nn': 'nodes', 'Nm' : 'mdisks', 'Nv' : 'vdisks'}
         for nodeId in nodeList:
+            #Parse the xml files
             for statType in ['Nn', 'Nv', 'Nm']:
                 filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
                 if filename not in downloadedList:
@@ -363,6 +364,7 @@ class SVCPlugin(base.Base):
                     return
                 self.logdebug("Parsing dump file : {}".format(filename))
                 stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+            # Load relevant xml content in dict   
             #Nodes
             self.dumps[nodeId]['sysid'] = stats[nodeId]['Nn'].get('id')
             if nodeId not in self.dumps[nodeId][nodes] :
@@ -779,6 +781,13 @@ class SVCPlugin(base.Base):
             else :
                 data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += float(mdiskGrpList[mdiskGrp]['wrp']/mdiskGrpList[mdiskGrp]['wo'])
 
+        # Set the value to 0 when the counter decrease
+        for level1 in data:
+            for level2 in data[level1]:
+                for level3 in data[level1][level2]:
+                    for level4 in data[level1][level2][level3]:
+                        if data[level1][level2][level3][level4] < 0:
+                            data[level1][level2][level3][level4] = 0
 
 
 
