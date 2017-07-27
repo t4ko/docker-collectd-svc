@@ -80,11 +80,11 @@ class SVCPlugin(base.Base):
             attempt = attempt - 1 
             time.sleep(1)
         if attempt <= 0 and not commandSuccess:
-            self.loginfo("Command {} failed {} times".format(str(int(time.time())), command, originalAttempt))
+            self.loginfo("Command {} failed {} times".format(command, originalAttempt))
             self.logverbose("Closing ssh connection")
             self.ssh.close()
         if attempt < originalAttempt and attempt > 0:
-            self.loginfo("Command {} succeeded after {} retry".format(str(int(time.time())), command, originalAttempt - attempt))
+            self.loginfo("Command {} succeeded after {} retry".format(command, originalAttempt - attempt))
         return commandSuccess, stdout
 
     def check_ssh(self):
@@ -662,7 +662,7 @@ class SVCPlugin(base.Base):
                     # write_cache_delay_percentage : Nv file > vdsk > ctwft + ctwwt (flush-through + write through)
                     # write_cache_delay_percentage not possible without accessing previous data, suggest using write_cache_delay_rate
                     ctw += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctw']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctw'])
-                    ctwft += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwft']) - int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwft'])
+                    ctwft += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwft']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctwft'])
                     ctwwt += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwwt']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctwwt'])
 
             if ctw > 0:
@@ -795,6 +795,7 @@ class SVCPlugin(base.Base):
                 data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += float(mdiskGrpList[mdiskGrp]['wrp']/mdiskGrpList[mdiskGrp]['wo'])
 
         # Set the value to 0 when the counter decrease
+        self.logdebug("Changing negative values to 0")
         for level1 in data:
             for level2 in data[level1]:
                 for level3 in data[level1][level2]:
@@ -802,6 +803,14 @@ class SVCPlugin(base.Base):
                         if data[level1][level2][level3][level4] < 0:
                             data[level1][level2][level3][level4] = 0
 
+        # Empty stats in "old" field
+        self.logdebug("Emptying old stats")
+        for nodeId in self.dumps:
+            for dumpType in  self.dumps[nodeId]:
+                if dumpType != "sysid":
+                    for component in self.dumps[nodeId][dumpType]:
+                        if 'old' in self.dumps[nodeId][dumpType][component]:
+                            del self.dumps[nodeId][dumpType][component]['old']
 
 
 

@@ -1,6 +1,11 @@
 # Collect IBM SVC metrics to graphite
+This is a collectd plugin developped to collect, calculate and store relevant data to monitor IBM SVC clusters.
+The plugin is written with python and we use the write_graphite plugin to store collected data.
 
-blabla
+## Docker
+This collectd plugin work in a dockerized environment : one container is needed for each cluster there is to monitor.
+This repository is linked to dockerhub to automatically compile the image corresponding to the last version available here.
+The image is available at https://hub.docker.com/r/t4ko/docker-collectd-svc/
 
 ## Running
 
@@ -25,5 +30,9 @@ Environment variables:
 * `HOST_NAME` - hostname to use in graphite.
 * `GRAPHITE_HOST` - host where carbon is listening for data.
 * `GRAPHITE_PORT` - port where carbon is listening for data, `2003` by default.
-* `GRAPHITE_UPDATE_INTERVAL` - metric update interval, `60` by default
 * `GRAPHITE_PREFIX` - prefix for metrics in graphite, `collectd.` by default.
+* `PLUGIN_INTERVAL` - collect interval, should match your dump creation interval, `60` by default.
+* `PLUGIN_CLUSTER_NAME` - name used for the cluster under which data will be stored.
+* `PLUGIN_CLUSTER_ADDRESS` - ip address or domain name of the cluster the container will collect data from.
+* `PLUGIN_CLUSTER_SSHUSER` - user name used to connect to the cluster with SSH, `VC` by default.
+* `PLUGIN_CLUSTER_SSHPRIVKEY` - path in the container to the private key used to connect with SSH (specified with -v)
