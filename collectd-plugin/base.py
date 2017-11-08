@@ -152,14 +152,17 @@ class Base(object):
 
     def logverbose(self, msg):
         if self.verbose:
-            collectd.info("%s: %s : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
+            collectd.info("%s : %s : [VER] : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
 
     def logdebug(self, msg):
         if self.debug:
-            collectd.info("%s: %s : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
+            collectd.info("%s : %s : [DEB] : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
 
     def loginfo(self, msg):
-        collectd.info("%s: %s : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
+        collectd.info("%s : %s : [INF] : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
+
+    def logerror(self, msg):
+        collectd.error("%s : %s : [ERR] : %s" % (self.prefix, time.strftime("%H:%M:%S", time.localtime()), msg))
         
     @staticmethod
     def reset_sigchld():

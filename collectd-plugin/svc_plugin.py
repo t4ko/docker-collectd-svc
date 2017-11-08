@@ -38,6 +38,8 @@ import paramiko
 from scp import SCPClient
 import os
 import time
+import pprint
+pp = pprint.PrettyPrinter(indent=4, depth=None)
 import xml.etree.cElementTree as ET
 from collections import defaultdict
 
@@ -72,7 +74,7 @@ class SVCPlugin(base.Base):
             (stdin, stdout, stderr) = self.ssh.exec_command(command)
             commandSuccess = True
             for errLine in list(stderr):
-                self.logverbose("STDERR : {}".format(errLine.replace('\n', '')))
+                self.logerror("STDERR : {}".format(errLine.replace('\n', '')))
                 if "CMMVC" in errLine: # SVC CLI error
                     commandSuccess = False
             if commandSuccess:
@@ -85,7 +87,7 @@ class SVCPlugin(base.Base):
             self.ssh.close()
         if attempt < originalAttempt and attempt > 0:
             self.loginfo("Command {} succeeded after {} retry".format(command, originalAttempt - attempt))
-        return commandSuccess, stdout
+        return commandSuccess, stdout, stderr
 
     def check_ssh(self):
         """Check that the ssh connection is established properly, return a boolean"""
@@ -120,30 +122,68 @@ class SVCPlugin(base.Base):
                 self.ssh.close()
 
         self.logverbose("Beginning stats collection")
+
         # Connect with ssh to svc
         if self.check_ssh():
             self.logverbose("SSH connection is still alive, not opening a new one")
 
         # Load the node list
         self.logverbose("Loading the node list")
-        (success, stdout) = self.check_command('lsnode -delim :')
-        if not success: return
-        nodeList = set()
-        firstLine = True
-        enclosure_id_index = 12
-        for line in list(stdout):
-            if firstLine:
-                firstLine = False
-                headers = line.split(':')
-                enclosure_id_index = headers.index('enclosure_id')
-                continue
-            nodeInfo = line.split(':')
-            nodeList.add(nodeInfo[enclosure_id_index])
-        self.logverbose("Loaded {} entry in the node list".format(len(nodeList)))
+
+        (success, stdout, stderr) = self.check_command('lsnode -delim :')
+
+        nodes_hash = {}
+        config_node =''
+        nodeEncIdList = []
+        stdout = list(stdout)
+        headers = stdout.pop(0)[:-1].split(':')
+
+        for line in stdout:
+            fields = line[:-1].split(':')
+            nodes_hash[fields[1]] = {}
+            i=0
+            for hd in headers:
+                nodes_hash[fields[1]][hd] = fields[i]
+                i += 1
+
+        self.logdebug("%s" % list(nodes_hash.keys()))
+
+        # Get stats files from each node
+        self.logverbose("Getting stats files for each nodes")
+
+        for node in nodes_hash.keys():
+
+            (success, stdout, stderr) = self.check_command('lsdumps -prefix /dumps/iostats/ -nohdr -delim : %s' % node)
+
+            nodes_hash[node]['files'] = []
+
+            nodeEncIdList.append(nodes_hash[node]['enclosure_id'])
+
+            if nodes_hash[node]['config_node'] == 'yes':
+                config_node = node
+
+            for line in reversed(list(stdout)):
+                nodes_hash[node]['files'].append(line[:-1].split(':')[1])
+
+            self.logdebug("%s: found %s file(s)" % (node, len(nodes_hash[node]['files'])))
+
+        # Copy missing stats files on config node
+        self.logverbose("Copying missing stats files on config node")
+
+        for node in nodes_hash.keys():
+
+            if nodes_hash[node]['config_node'] == 'yes' : continue
+
+            missing_file = list(set(nodes_hash[node]['files']) - set(nodes_hash[config_node]['files']))
+
+            for file in missing_file:
+
+                self.logdebug("copying %s from %s" % (file, node))
+                (success, stdout, stderr) = self.check_command('cpdumps -prefix /dumps/iostats/%s %s' % (file, node))
 
         # Load the timezone
         if self.timezone == None:
-            (success, stdout) = self.check_command('showtimezone -nohdr -delim :')
+            (success, stdout, stderr) = self.check_command('showtimezone -nohdr -delim :')
             if not success: return
             for line in stdout:
                 self.timezone = line.split(':')[1].replace('\n', '')
@@ -152,21 +192,13 @@ class SVCPlugin(base.Base):
             time.tzset()
             self.logverbose("Working timezone set to {} {}".format(os.environ['TZ'], time.strftime("%z", time.localtime())))
 
-
-
-
-
-
-
-
-
         #Get the time at which all nodes made their iostats dump 
         self.logverbose("Searching the time at which all dumps are available")
-        (success, stdout) = self.check_command('lsdumps -prefix /dumps/iostats/ -nohdr')
+        (success, stdout, stderr) = self.check_command('lsdumps -prefix /dumps/iostats/ -nohdr')
         if not success: return
         timestamps = {}
         lsdumpsList = set()
-        dumpCount = len(nodeList) * 4
+        dumpCount = len(nodeEncIdList) * 4
         self.logdebug("Lsdumps returns : ")
         for line in reversed(list(stdout)):
             line = line.replace('\n', '')
@@ -184,9 +216,11 @@ class SVCPlugin(base.Base):
                     'string' : timeString,
                     'counter' : 1
                 }
-        self.logdebug("lsdumps set contains :\n {}".format(str(lsdumpsList)))
-        self.logdebug("Timestamp counter is :\n {}".format(str(timestamps)))
+        self.logdebug("lsdumps set contains :\n %s" % pprint.pformat(lsdumpsList))
+        self.logdebug("timestamps available :\n %s" % pprint.pformat(timestamps))
+
         currentTime = 0
+
         if self.forcedTime == 0: # Don't update the timestamp if the time is forced
             currentTime = self.time
             for epoch in sorted(timestamps.keys(), reverse=True):
@@ -238,12 +272,10 @@ class SVCPlugin(base.Base):
         else:
             oldTimeString = 'XXXXXX_XXXXXX'
 
-
         # Create the dumps directory if it does not exist yet
         dumpsFolder = '{}/svc-stats-dumps'.format(os.getcwd())
         if not os.path.exists(dumpsFolder):
             os.makedirs(dumpsFolder)
-
 
         # Check if the last available dumps have not already been collected
         dumpsList = os.listdir(dumpsFolder)
@@ -254,20 +286,18 @@ class SVCPlugin(base.Base):
                 self.ssh.close()
                 return
 
-
         # Check if files from previous stats are already in the directory
         oldFileDownloaded, oldFileAvailable = True, True
         oldDumpsList = set()
         self.logdebug("Before doing anything the dumps folder contains :\n {}".format(str(dumpsList)))
         self.logdebug("Old dumps list contains :")
-        for nodeId in nodeList:
+        for nodeId in nodeEncIdList:
             for statType in ['Nn', 'Nv', 'Nm']:
                 oldFileName = "{0}_stats_{1}_{2}".format(statType, nodeId, oldTimeString)
                 oldDumpsList.add(oldFileName)
                 self.logdebug(oldFileName)
                 if oldFileName not in dumpsList:
                     oldFileDownloaded = False
-
 
         # Download the file from the SVC cluster if they are available
         self.check_ssh()
@@ -289,7 +319,6 @@ class SVCPlugin(base.Base):
             self.logdebug("String passed to scp.get is : /dumps/iostats/*{}".format(newTimeString))
             scp.get("/dumps/iostats/*{}".format(newTimeString), dumpsFolder)
 
-
         # Load and parse previous files if they are available
         self.logverbose("Loading and parsing the old files")
         old_stats = defaultdict(dict)
@@ -301,7 +330,7 @@ class SVCPlugin(base.Base):
                 statType, junk1, panelId, junk2, junk3 = filename.split('_')
                 old_stats[panelId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
             # Load relevant xml content in dict
-            for nodeId in nodeList:
+            for nodeId in nodeEncIdList:
                 self.dumps[nodeId] = { 'nodes' : {}, 'mdisks' : {}, 'vdisks' : {}, 'sysid' : '' }
                 #Nodes
                 if nodeId not in self.dumps[nodeId][nodes] :
@@ -348,14 +377,13 @@ class SVCPlugin(base.Base):
                                 self.dumps[nodeId][dumpType][component]['old'] = self.dumps[nodeId][dumpType][component]['new']
                                 del self.dumps[nodeId][dumpType][component]['new']
 
-
         # Load and parse the current files 
         self.logverbose("Loading and parsing the last files")
         stats = defaultdict(dict)
         dumps = defaultdict(dict)
         downloadedList = str(os.listdir(dumpsFolder))
         self.logdebug("Stats dumps directory contains : \n{}".format(downloadedList))
-        for nodeId in nodeList:
+        for nodeId in nodeEncIdList:
             #Parse the xml files
             for statType in ['Nn', 'Nv', 'Nm']:
                 filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
@@ -416,19 +444,11 @@ class SVCPlugin(base.Base):
         for filename in dumpsList:
             os.remove('{0}/{1}'.format(dumpsFolder, filename))
 
-
-
-
-
-        
-
-
-
         # Load the MdiskGrp names and their Mdisk from the svc cluster
         self.logverbose("Loading the mdisk list")
         mdiskGrpList = { }
         mdiskList = { }
-        (success, stdout_mdsk) = self.check_command('lsmdisk -delim :')
+        (success, stdout_mdsk, stderr) = self.check_command('lsmdisk -delim :')
         if not success: return
         isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
         for line in stdout_mdsk:
@@ -463,7 +483,7 @@ class SVCPlugin(base.Base):
         for mdisk in allmdisks:
             if mdisk not in mdiskList:
                 self.logdebug("Mdisk {} found in dump file is not in lsmdisk".format(mdisk))
-                for nodeId in nodeList:
+                for nodeId in nodeEncIdList:
                     self.dumps[nodeId][mdisks].pop(mdisk, None)
         self.logverbose("Loaded {} entry in the mdisk list".format(len(mdiskList)))
 
@@ -471,7 +491,7 @@ class SVCPlugin(base.Base):
         self.logverbose("Loading the vdisk list")
         vdiskList = {}
         manyMdiskgrp = set()
-        (success, stdout_vdsk) = self.check_command('lsvdisk -delim :')
+        (success, stdout_vdsk, stderr) = self.check_command('lsvdisk -delim :')
         if not success: return
         isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
         for line in stdout_vdsk:
@@ -498,7 +518,7 @@ class SVCPlugin(base.Base):
                 vdiskList[splittedLine[nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
 
         if(len(manyMdiskgrp) > 0):
-            (success, stdout_details) = self.check_command('lsvdiskcopy -delim :')
+            (success, stdout_details, stderr) = self.check_command('lsvdiskcopy -delim :')
             if not success: return
             self.logverbose("{} vdisks on many mdiskGrp, loading details from lsvdiskcopy".format(len(manyMdiskgrp)))
             isFirst, vdisk_nameIndex, mdisk_grp_nameIndex = True, -1, -1
@@ -518,28 +538,20 @@ class SVCPlugin(base.Base):
         for vdisk in allvdisks:
             if vdisk not in vdiskList:
                 self.logdebug("Vdisk {} found in dump file is not in lsvdisk".format(vdisk))
-                for nodeId in nodeList:
+                for nodeId in nodeEncIdList:
                     self.dumps[nodeId][vdisks].pop(vdisk, None)
         self.logverbose("Loaded {} entry in the vdisk list".format(len(vdiskList)))
         if self.forcedTime == 0:
             self.logverbose("Closing ssh connection")
             self.ssh.close()
 
-
-
-
-
-
-
-
-
-
         self.logverbose("Initializing data structures")
+
         ## Metrics for SVC nodes
         data = { clusternode : {}, clustervdsk : {}, clustermdsk : {} }
 
         # Initialize the structure for storing the collected data for nodes
-        for nodeId in nodeList:
+        for nodeId in nodeEncIdList:
             data[clusternode][self.dumps[nodeId]['sysid']] = { 'gauge' : {} }
             data[clusternode][self.dumps[nodeId]['sysid']]['gauge'] = {
                 'read_response_time' : 0,
@@ -598,20 +610,13 @@ class SVCPlugin(base.Base):
                 'write_data_rate' : 0
             }
 
-
-
-
-
-
-
-
-
         self.logverbose("Starting gathering metrics")
+
         ## Iterate over the nodes to analyse their stats files
-        for nodeId in nodeList:
+        for nodeId in nodeEncIdList:
             node_sysid = self.dumps[nodeId]['sysid']
 
-## Metrics for nodes (cpu)
+            # Metrics for nodes (cpu)
             if len(self.dumps[nodeId][nodes][nodeId]) == 2:
                 data[clusternode][node_sysid]['gauge']['cpu_utilization'] = (self.dumps[nodeId][nodes][nodeId]['new']['cpu'] - self.dumps[nodeId][nodes][nodeId]['old']['cpu'])/(self.interval * 10) #busy time / total time (milliseconds)
 
@@ -626,7 +631,7 @@ class SVCPlugin(base.Base):
                     total_rrp += self.dumps[nodeId][vdisks][vdisk]['new']['rl'] - self.dumps[nodeId][vdisks][vdisk]['old']['rl']
                     total_wrp += self.dumps[nodeId][vdisks][vdisk]['new']['wl'] - self.dumps[nodeId][vdisks][vdisk]['old']['wl']
 
-## Front-end metrics (volumes)    
+            # Front-end metrics (volumes)    
                     #node
                     data[clusternode][node_sysid]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
                     data[clusternode][node_sysid]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
@@ -678,9 +683,7 @@ class SVCPlugin(base.Base):
             else :
                 data[clusternode][node_sysid]['gauge']['write_response_time'] =float(total_wrp/total_wo)
 
-
-
-# Back-end metrics (disks)
+            # Back-end metrics (disks)
             total_rrp, total_ro, total_wrp, total_wo = 0, 0, 0, 0
             for mdisk in self.dumps[nodeId][mdisks]:
                 if len(self.dumps[nodeId][mdisks][mdisk]) == 2:
@@ -724,7 +727,7 @@ class SVCPlugin(base.Base):
                 data[clusternode][node_sysid]['gauge']['backend_write_response_time'] =float(total_wrp/total_wo)
 
 
-# Make rates out of counters and remove unnecessary precision
+        # Make rates out of counters and remove unnecessary precision
         for node_sysid in data[clusternode]: # node
             data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_data_rate'] / self.interval)
             data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] = int(data[clusternode][node_sysid]['gauge']['backend_read_io_rate'] / self.interval)
@@ -751,8 +754,9 @@ class SVCPlugin(base.Base):
             data[clustervdsk][vdiskId]['gauge']['read_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_io_rate'] / self.interval)
             data[clustervdsk][vdiskId]['gauge']['write_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_io_rate'] / self.interval)
 
-# Response time
-# Aggregate metrics of individual mdisk by mdiskGrp
+        # Response time
+        # Aggregate metrics of individual mdisk by mdiskGrp
+
         # Frontend latency    
         for vdisk in vdiskList: 
             mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['ro'] += vdiskList[vdisk]['ro']
@@ -767,14 +771,17 @@ class SVCPlugin(base.Base):
                 data[clustervdsk][vdisk]['gauge']['write_response_time'] += float(0)
             else : 
                 data[clustervdsk][vdisk]['gauge']['write_response_time'] += vdiskList[vdisk]['wrp'] / vdiskList[vdisk]['wo']
+
         # Aggregate metrics of individual mdisk by mdiskGrp
         for mdisk in mdiskList: 
             mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_ro'] += mdiskList[mdisk]['ro']
             mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_wo'] += mdiskList[mdisk]['wo']
             mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_rrp'] += mdiskList[mdisk]['rrp']
             mdiskGrpList[mdiskList[mdisk]['mdiskGrpName']]['b_wrp'] += mdiskList[mdisk]['wrp']
-# Get average response time by IO (total response time / numbers of IO)
-# Backend latency
+
+        # Get average response time by IO (total response time / numbers of IO)
+
+        # Backend latency
         for mdiskGrp in mdiskGrpList:
             if mdiskGrpList[mdiskGrp]['b_ro'] == 0: #avoid division by 0
                 data[clustermdsk][mdiskGrp]['gauge']['backend_read_response_time'] += float(0)
@@ -784,7 +791,8 @@ class SVCPlugin(base.Base):
                 data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += float(0)
             else :
                 data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += float(mdiskGrpList[mdiskGrp]['b_wrp']/mdiskGrpList[mdiskGrp]['b_wo'])
-# Frontend latency
+
+        # Frontend latency
             if mdiskGrpList[mdiskGrp]['ro'] == 0: #avoid division by 0
                 data[clustermdsk][mdiskGrp]['gauge']['read_response_time'] += float(0)
             else :
@@ -811,12 +819,6 @@ class SVCPlugin(base.Base):
                     for component in self.dumps[nodeId][dumpType]:
                         if 'old' in self.dumps[nodeId][dumpType][component]:
                             del self.dumps[nodeId][dumpType][component]['old']
-
-
-
-
-
-
 
         self.logverbose("Finished gathering metrics")
         return data
