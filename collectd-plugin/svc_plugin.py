@@ -86,7 +86,7 @@ class SVCPlugin(base.Base):
             self.logverbose("Closing ssh connection")
             self.ssh.close()
         if attempt < originalAttempt and attempt > 0:
-            self.loginfo("Command {} succeeded after {} retry".format(command, originalAttempt - attempt))
+            self.logverbose("Command {} succeeded after {} retry".format(command, originalAttempt - attempt))
         return commandSuccess, stdout, stderr
 
     def check_ssh(self):
@@ -159,27 +159,31 @@ class SVCPlugin(base.Base):
 
             nodeEncIdList.append(nodes_hash[node]['enclosure_id'])
 
-            if nodes_hash[node]['config_node'] == 'yes':
-                config_node = node
-
             for line in reversed(list(stdout)):
                 nodes_hash[node]['files'].append(line[:-1].split(':')[1])
 
-            self.logdebug("%s: found %s file(s)" % (node, len(nodes_hash[node]['files'])))
+            if nodes_hash[node]['config_node'] == 'yes':
+                config_node = node
+            else:
+                nodes_hash[node]['files'] = nodes_hash[node]['files'][:16]
+
+            self.logdebug("%s(%s): found %s file(s)" % (node, nodes_hash[node]['enclosure_id'], len(nodes_hash[node]['files'])))
 
         # Copy missing stats files on config node
-        self.logverbose("Copying missing stats files on config node")
+        self.logverbose("Copying last missing stats files on config node")
 
         for node in nodes_hash.keys():
 
             if nodes_hash[node]['config_node'] == 'yes' : continue
 
-            missing_file = list(set(nodes_hash[node]['files']) - set(nodes_hash[config_node]['files']))
+            missing_file = set(nodes_hash[node]['files']) - set(nodes_hash[config_node]['files'])
+
+            pattern = re.compile(".*_%s_.*" % nodes_hash[node]['enclosure_id'])
 
             for file in missing_file:
-
-                self.logdebug("copying %s from %s" % (file, node))
-                (success, stdout, stderr) = self.check_command('cpdumps -prefix /dumps/iostats/%s %s' % (file, node))
+                if pattern.match(file):
+                    self.logdebug("copying %s from %s" % (file, node))
+                    (success, stdout, stderr) = self.check_command('cpdumps -prefix /dumps/iostats/%s %s' % (file, node))
 
         # Load the timezone
         if self.timezone == None:
