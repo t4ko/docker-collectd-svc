@@ -627,52 +627,53 @@ class SVCPlugin(base.Base):
             write_cache_delay_percentage, ctw, ctwft, ctwwt = 0, 0, 0, 0
             total_rrp, total_ro, total_wrp, total_wo = 0, 0, 0, 0
             for vdisk in self.dumps[nodeId][vdisks]:
-                mdiskGrp = vdiskList[vdisk]['mdiskGrpName']
-                if len(self.dumps[nodeId][vdisks][vdisk]) == 2:
+                if vdiskList[vdisk]['mdiskGrpName'] in vdiskList:
+                    mdiskGrp = vdiskList[vdisk]['mdiskGrpName']
+                    if len(self.dumps[nodeId][vdisks][vdisk]) == 2:
 
-                    total_ro += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
-                    total_wo += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
-                    total_rrp += self.dumps[nodeId][vdisks][vdisk]['new']['rl'] - self.dumps[nodeId][vdisks][vdisk]['old']['rl']
-                    total_wrp += self.dumps[nodeId][vdisks][vdisk]['new']['wl'] - self.dumps[nodeId][vdisks][vdisk]['old']['wl']
+                        total_ro += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
+                        total_wo += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
+                        total_rrp += self.dumps[nodeId][vdisks][vdisk]['new']['rl'] - self.dumps[nodeId][vdisks][vdisk]['old']['rl']
+                        total_wrp += self.dumps[nodeId][vdisks][vdisk]['new']['wl'] - self.dumps[nodeId][vdisks][vdisk]['old']['wl']
 
-            # Front-end metrics (volumes)    
-                    #node
-                    data[clusternode][node_sysid]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
-                    data[clusternode][node_sysid]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
-                    data[clusternode][node_sysid]['gauge']['write_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wb'] - self.dumps[nodeId][vdisks][vdisk]['old']['wb']
-                    data[clusternode][node_sysid]['gauge']['write_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
-                    if data[clusternode][node_sysid]['gauge']['peak_read_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['rlw']:
-                        data[clusternode][node_sysid]['gauge']['peak_read_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['rlw']
-                    if data[clusternode][node_sysid]['gauge']['peak_write_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['wlw']:
-                        data[clusternode][node_sysid]['gauge']['peak_write_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['wlw']
-                    #mdisk
-                    data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
-                    data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
-                    data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wb'] - self.dumps[nodeId][vdisks][vdisk]['old']['wb']
-                    data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
-                    if data[clustermdsk][mdiskGrp]['gauge']['peak_read_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['rlw']:
-                        data[clustermdsk][mdiskGrp]['gauge']['peak_read_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['rlw']
-                    if data[clustermdsk][mdiskGrp]['gauge']['peak_write_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['wlw']:
-                        data[clustermdsk][mdiskGrp]['gauge']['peak_write_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['wlw']
-                    #vdisk
-                    data[clustervdsk][vdisk]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
-                    data[clustervdsk][vdisk]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
-                    data[clustervdsk][vdisk]['gauge']['write_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wb'] - self.dumps[nodeId][vdisks][vdisk]['old']['wb']
-                    data[clustervdsk][vdisk]['gauge']['write_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
-                    if data[clustervdsk][vdisk]['gauge']['peak_read_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['rlw']:
-                        data[clustervdsk][vdisk]['gauge']['peak_read_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['rlw']
-                    if data[clustervdsk][vdisk]['gauge']['peak_write_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['wlw']:
-                        data[clustervdsk][vdisk]['gauge']['peak_write_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['wlw']
-                    #Response time
-                    vdiskList[vdisk]['ro'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
-                    vdiskList[vdisk]['wo']  += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
-                    vdiskList[vdisk]['rrp']  += self.dumps[nodeId][vdisks][vdisk]['new']['rl'] - self.dumps[nodeId][vdisks][vdisk]['old']['rl']
-                    vdiskList[vdisk]['wrp']  += self.dumps[nodeId][vdisks][vdisk]['new']['wl'] - self.dumps[nodeId][vdisks][vdisk]['old']['wl']
-                    # write_cache_delay_percentage : Nv file > vdsk > ctwft + ctwwt (flush-through + write through)
-                    # write_cache_delay_percentage not possible without accessing previous data, suggest using write_cache_delay_rate
-                    ctw += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctw']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctw'])
-                    ctwft += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwft']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctwft'])
-                    ctwwt += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwwt']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctwwt'])
+                # Front-end metrics (volumes)    
+                        #node
+                        data[clusternode][node_sysid]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
+                        data[clusternode][node_sysid]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
+                        data[clusternode][node_sysid]['gauge']['write_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wb'] - self.dumps[nodeId][vdisks][vdisk]['old']['wb']
+                        data[clusternode][node_sysid]['gauge']['write_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
+                        if data[clusternode][node_sysid]['gauge']['peak_read_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['rlw']:
+                            data[clusternode][node_sysid]['gauge']['peak_read_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['rlw']
+                        if data[clusternode][node_sysid]['gauge']['peak_write_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['wlw']:
+                            data[clusternode][node_sysid]['gauge']['peak_write_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['wlw']
+                        #mdisk
+                        data[clustermdsk][mdiskGrp]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
+                        data[clustermdsk][mdiskGrp]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
+                        data[clustermdsk][mdiskGrp]['gauge']['write_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wb'] - self.dumps[nodeId][vdisks][vdisk]['old']['wb']
+                        data[clustermdsk][mdiskGrp]['gauge']['write_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
+                        if data[clustermdsk][mdiskGrp]['gauge']['peak_read_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['rlw']:
+                            data[clustermdsk][mdiskGrp]['gauge']['peak_read_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['rlw']
+                        if data[clustermdsk][mdiskGrp]['gauge']['peak_write_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['wlw']:
+                            data[clustermdsk][mdiskGrp]['gauge']['peak_write_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['wlw']
+                        #vdisk
+                        data[clustervdsk][vdisk]['gauge']['read_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['rb'] - self.dumps[nodeId][vdisks][vdisk]['old']['rb']
+                        data[clustervdsk][vdisk]['gauge']['read_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
+                        data[clustervdsk][vdisk]['gauge']['write_data_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wb'] - self.dumps[nodeId][vdisks][vdisk]['old']['wb']
+                        data[clustervdsk][vdisk]['gauge']['write_io_rate'] += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
+                        if data[clustervdsk][vdisk]['gauge']['peak_read_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['rlw']:
+                            data[clustervdsk][vdisk]['gauge']['peak_read_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['rlw']
+                        if data[clustervdsk][vdisk]['gauge']['peak_write_response_time'] < self.dumps[nodeId][vdisks][vdisk]['new']['wlw']:
+                            data[clustervdsk][vdisk]['gauge']['peak_write_response_time'] = self.dumps[nodeId][vdisks][vdisk]['new']['wlw']
+                        #Response time
+                        vdiskList[vdisk]['ro'] += self.dumps[nodeId][vdisks][vdisk]['new']['ro'] - self.dumps[nodeId][vdisks][vdisk]['old']['ro']
+                        vdiskList[vdisk]['wo']  += self.dumps[nodeId][vdisks][vdisk]['new']['wo'] - self.dumps[nodeId][vdisks][vdisk]['old']['wo']
+                        vdiskList[vdisk]['rrp']  += self.dumps[nodeId][vdisks][vdisk]['new']['rl'] - self.dumps[nodeId][vdisks][vdisk]['old']['rl']
+                        vdiskList[vdisk]['wrp']  += self.dumps[nodeId][vdisks][vdisk]['new']['wl'] - self.dumps[nodeId][vdisks][vdisk]['old']['wl']
+                        # write_cache_delay_percentage : Nv file > vdsk > ctwft + ctwwt (flush-through + write through)
+                        # write_cache_delay_percentage not possible without accessing previous data, suggest using write_cache_delay_rate
+                        ctw += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctw']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctw'])
+                        ctwft += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwft']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctwft'])
+                        ctwwt += int(self.dumps[nodeId][vdisks][vdisk]['new']['ctwwt']) - int(self.dumps[nodeId][vdisks][vdisk]['old']['ctwwt'])
 
             if ctw > 0:
                 write_cache_delay_percentage = ( ctwft + ctwwt ) / ctw
