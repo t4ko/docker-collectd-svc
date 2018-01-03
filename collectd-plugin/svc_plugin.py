@@ -246,14 +246,14 @@ class SVCPlugin(base.Base):
             for catchupEpoch in sorted(self.catchup.keys()):
                 if (catchupEpoch in timestamps) and (timestamps[catchupEpoch]['counter'] == dumpCount): # The dumps are still on the cluster
                     self.logverbose("Catching up stats collection for timestamp {}".format(self.catchup[catchupEpoch]))
-                    self.read_callback(timestamp=(catchupEpoch))
                     del self.catchup[catchupEpoch]
+                    self.read_callback(timestamp=(catchupEpoch))
                 else:
                     tempCount = 0
                     for epoch in sorted(timestamps.keys()):
                         if int(epoch) >= int(catchupEpoch):
                             tempCount = tempCount + 1
-                            if tempCount >= 15: #Remove timestamps that can't be collected
+                            if tempCount >= 15: #Remove outdated timestamps that can't be collected
                                 self.logverbose("Stats dumps are no more available for timestamps {}".format(self.catchup[catchupEpoch]))
                                 del self.catchup[catchupEpoch]
                                 break
@@ -283,12 +283,13 @@ class SVCPlugin(base.Base):
 
         # Check if the last available dumps have not already been collected
         dumpsList = os.listdir(dumpsFolder)
-        for dumpName in dumpsList:
-            if newTimeString in dumpName:
-                self.loginfo("New stats dumps are not yet available")
-                self.logverbose("Closing ssh connection")
-                self.ssh.close()
-                return
+        if not self.forcedTime:
+            for dumpName in dumpsList:
+                if newTimeString in dumpName:
+                    self.loginfo("New stats dumps are not yet available")
+                    self.logverbose("Closing ssh connection")
+                    self.ssh.close()
+                    return
 
         # Check if files from previous stats are already in the directory
         oldFileDownloaded, oldFileAvailable = True, True
@@ -317,11 +318,21 @@ class SVCPlugin(base.Base):
         if not oldFileDownloaded and oldFileAvailable:
             self.logverbose("Downloading old and new dumps")
             self.logdebug("String passed to scp.get is : /dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString))
-            scp.get("/dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString), dumpsFolder)
+            try:
+                scp.get("/dumps/iostats/*{} /dumps/iostats/*{}".format(oldTimeString, newTimeString), dumpsFolder)
+            except:
+                self.logerror("SCP error while downloading dumps, retrying")
+                self.catchup[self.time] = newTimeString
+                return
         elif oldFileDownloaded or not oldFileAvailable:
             self.logverbose("Downloading new dumps")
             self.logdebug("String passed to scp.get is : /dumps/iostats/*{}".format(newTimeString))
-            scp.get("/dumps/iostats/*{}".format(newTimeString), dumpsFolder)
+            try:
+                scp.get("/dumps/iostats/*{}".format(newTimeString), dumpsFolder)
+            except:
+                self.logerror("SCP error while downloading dumps, retrying")
+                self.catchup[self.time] = newTimeString
+                return
 
         # Load and parse previous files if they are available
         self.logverbose("Loading and parsing the old files")
@@ -333,7 +344,7 @@ class SVCPlugin(base.Base):
                 self.logdebug("Parsing old dump file : {}".format(filename))
                 statType, junk1, panelId, junk2, junk3 = filename.split('_')
                 old_stats[panelId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
-            # Load relevant xml content in dict
+            # Load relevant xml content in dict 
             for nodeId in nodeEncIdList:
                 self.dumps[nodeId] = { 'nodes' : {}, 'mdisks' : {}, 'vdisks' : {}, 'sysid' : '' }
                 #Nodes
@@ -393,6 +404,7 @@ class SVCPlugin(base.Base):
                 filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
                 if filename not in downloadedList:
                     self.loginfo("Dump not downloaded, could not collect stats : {}".format(filename))
+                    self.catchup[self.time] = newTimeString
                     return
                 self.logdebug("Parsing dump file : {}".format(filename))
                 stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
