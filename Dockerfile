@@ -11,12 +11,15 @@ RUN pip3 install envtpl paramiko scp
 #RUN tar jxvf collectd-5.7.2.tar.bz2 && rm collectd-5.7.2.tar.bz2
 #Use git until the pull request for tags in write_graphite plugin is merged
 RUN git clone https://github.com/DanCech/collectd.git -b tagged-carbon ./collectd-src
+RUN cd collectd-src
 RUN git checkout 09666a4a1d3511cbc6c4473f8946bd334a80d55b
 
 
 # Compile and purge source files 
-RUN cd collectd-5.7.2 && ./configure && make all install
-RUN cd .. && rm -rf collectd-5.7.2
+RUN ./configure && make all install
+RUN cd .. && rm -rf collectd-src
+#RUN cd collectd-5.7.2 && ./configure && make all install
+#RUN cd .. && rm -rf collectd-5.7.2
 
 # Optionnal post installation tasks 
 RUN ln -s /opt/collectd/sbin/collectd /usr/sbin/collectd
