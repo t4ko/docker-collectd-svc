@@ -511,27 +511,31 @@ class SVCPlugin(base.Base):
         if not success: return
         isFirst, nameIndex, mdisk_grp_nameIndex = True, -1, -1
         for line in stdout_vdsk:
-            splittedLine = line.split(':')
+            splitted = line.split(':')
             if isFirst:
                 isFirst = False
-                nameIndex, mdisk_grp_nameIndex = splittedLine.index('name'), splittedLine.index('mdisk_grp_name')
+                nameIndex, mdisk_grp_nameIndex, iogrp_nameIndex, uidIndex = splitted.index('name'), splitted.index('mdisk_grp_name'), splitted.index('IO_group_name'), splitted.index('vdisk_UID')
                 continue
-            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or nameIndex == mdisk_grp_nameIndex:
+            if nameIndex == -1 or mdisk_grp_nameIndex == -1 or iogrp_nameIndex == -1:
                 self.loginfo('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
                 self.logverbose("Closing ssh connection")
                 self.ssh.close()
                 return
-            vdiskList[splittedLine[nameIndex]] = { 
-                'mdiskGrpName' : '', 
+            vdiskList[splitted[nameIndex]] = { 
+                'mdiskGrpName' : '',
+                'iogrp': '',
+                'UID' : '',
                 'ro' : 0, 
                 'wo' : 0, 
                 'rrp' : 0, 
                 'wrp' : 0 
             }
-            if splittedLine[mdisk_grp_nameIndex] == 'many': # the vdisk is in several mdisk groups
-                manyMdiskgrp.add(splittedLine[nameIndex])
+            vdiskList[splitted[nameIndex]]['iogrp'] = splitted[iogrp_nameIndex]
+            vdiskList[splitted[nameIndex]]['UID'] = splitted[uidIndex]
+            if splitted[mdisk_grp_nameIndex] == 'many': # the vdisk is in several mdisk groups
+                manyMdiskgrp.add(splitted[nameIndex])
             else: # the vdisk is in a single mdisk group
-                vdiskList[splittedLine[nameIndex]]['mdiskGrpName'] = splittedLine[mdisk_grp_nameIndex]
+                vdiskList[splitted[nameIndex]]['mdiskGrpName'] = splitted[mdisk_grp_nameIndex]
 
         if(len(manyMdiskgrp) > 0):
             (success, stdout_details, stderr) = self.check_command('lsvdiskcopy -delim :')
@@ -782,11 +786,11 @@ class SVCPlugin(base.Base):
             mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['rrp'] += vdiskList[vdisk]['rrp']
             mdiskGrpList[vdiskList[vdisk]['mdiskGrpName']]['wrp'] += vdiskList[vdisk]['wrp']
             if vdiskList[vdisk]['ro'] == 0:
-                data[clustervdsk][vdisk]['gauge']['read_response_time'] += float(0)
+                data[clustervdsk][vdisk]['gauge']['read_response_time'] += 0.0
             else :
                 data[clustervdsk][vdisk]['gauge']['read_response_time'] += vdiskList[vdisk]['rrp'] / vdiskList[vdisk]['ro']
             if vdiskList[vdisk]['wo'] == 0:
-                data[clustervdsk][vdisk]['gauge']['write_response_time'] += float(0)
+                data[clustervdsk][vdisk]['gauge']['write_response_time'] += 0.0
             else : 
                 data[clustervdsk][vdisk]['gauge']['write_response_time'] += vdiskList[vdisk]['wrp'] / vdiskList[vdisk]['wo']
 
@@ -802,21 +806,21 @@ class SVCPlugin(base.Base):
         # Backend latency
         for mdiskGrp in mdiskGrpList:
             if mdiskGrpList[mdiskGrp]['b_ro'] == 0: #avoid division by 0
-                data[clustermdsk][mdiskGrp]['gauge']['backend_read_response_time'] += float(0)
+                data[clustermdsk][mdiskGrp]['gauge']['backend_read_response_time'] += 0.0
             else :
                 data[clustermdsk][mdiskGrp]['gauge']['backend_read_response_time'] += float(mdiskGrpList[mdiskGrp]['b_rrp']/mdiskGrpList[mdiskGrp]['b_ro'])
             if mdiskGrpList[mdiskGrp]['b_wo'] == 0: #avoid division by 0
-                data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += float(0)
+                data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += 0.0
             else :
                 data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += float(mdiskGrpList[mdiskGrp]['b_wrp']/mdiskGrpList[mdiskGrp]['b_wo'])
 
         # Frontend latency
             if mdiskGrpList[mdiskGrp]['ro'] == 0: #avoid division by 0
-                data[clustermdsk][mdiskGrp]['gauge']['read_response_time'] += float(0)
+                data[clustermdsk][mdiskGrp]['gauge']['read_response_time'] += 0.0
             else :
                 data[clustermdsk][mdiskGrp]['gauge']['read_response_time'] += float(mdiskGrpList[mdiskGrp]['rrp']/mdiskGrpList[mdiskGrp]['ro'])
             if mdiskGrpList[mdiskGrp]['wo'] == 0: #avoid division by 0
-                data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += float(0)
+                data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += 0.0
             else :
                 data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += float(mdiskGrpList[mdiskGrp]['wrp']/mdiskGrpList[mdiskGrp]['wo'])
 
@@ -828,6 +832,23 @@ class SVCPlugin(base.Base):
                     for level4 in data[level1][level2][level3]:
                         if data[level1][level2][level3][level4] < 0:
                             data[level1][level2][level3][level4] = 0
+
+        #Add tags to metrics (mdisk group, io group)
+        for cluster_type in data:
+            for equipment in data[cluster_type]:
+                #Generate tags
+                tag_vdsk, tag_mdsk, tag_node = "", "", "";
+                if cluster_type == clustervdsk:
+                    tag_vdsk = ";vdisk_UID=" + vdiskList[equipment]["UID"] + ";IO_group_name=" + vdiskList[equipment]["iogrp"] + ";mdisk_grp_name=" + vdiskList[equipment]["mdiskGrpName"]
+                # elif cluster_type == clustermdsk:
+                #     tag_mdsk = ";IO_group_name=" + mdiskList[equipment]["iogrp"]
+                # elif cluster_type == clusternode:
+                #     pass #No tag implemented for the moment
+
+                for metric_type in data[cluster_type][equipment]:
+                    for metric_name in data[cluster_type][equipment][metric_type]:
+                        data[cluster_type][equipment][metric_type][metric_name] = str(data[cluster_type][equipment][metric_type][metric_name]) + tag_vdsk
+
 
         # Empty stats in "old" field
         self.logdebug("Emptying old stats")
