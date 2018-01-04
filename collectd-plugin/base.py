@@ -94,23 +94,25 @@ class Base(object):
         try:
             for plugin in stats.keys():
                 for plugin_instance in stats[plugin].keys():
+                    if plugin_instance == "tags":
+                        continue
                     for type in stats[plugin][plugin_instance].keys():
                         type_value = stats[plugin][plugin_instance][type]
                         if not isinstance(type_value, dict):
-                            self.dispatch_value(plugin, plugin_instance, type, None, type_value)
+                            self.dispatch_value(plugin, plugin_instance, type, None, "", type_value)
                         else:
                           for type_instance in stats[plugin][plugin_instance][type].keys():
                               self.dispatch_value(plugin, plugin_instance,
-                                      type, type_instance,
+                                      type, type_instance, stats[plugin][plugin_instance]['tags'],
                                       stats[plugin][plugin_instance][type][type_instance])
         except Exception as exc:
             collectd.error("%s: failed to dispatch values :: %s :: %s"
                     % (self.prefix, exc, traceback.format_exc()))
 
-    def dispatch_value(self, plugin, plugin_instance, type, type_instance, value):
+    def dispatch_value(self, plugin, plugin_instance, type, type_instance, tags, value):
         """Looks for the given stat in stats, and dispatches it"""
-        self.logdebug("dispatching value %s.%s.%s.%s=%s"
-                % (plugin, plugin_instance, type, type_instance, value))
+        self.logdebug("dispatching value %s.%s.%s.%s%s=%s"
+                % (plugin, plugin_instance, type, type_instance, tags, value))
 
         val = collectd.Values(type)
         val.plugin=plugin
@@ -119,6 +121,7 @@ class Base(object):
             val.type_instance=type_instance
         else:
             val.type_instance=type
+        val.type_instance=val.type_instance + tags #Add tags
         val.values=[value]
         val.interval = self.interval
         val.dispatch(time=self.time) #passed time is UTC

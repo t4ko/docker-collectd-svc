@@ -844,10 +844,7 @@ class SVCPlugin(base.Base):
                 #     tag_mdsk = ";IO_group_name=" + mdiskList[equipment]["iogrp"]
                 # elif cluster_type == clusternode:
                 #     pass #No tag implemented for the moment
-
-                for metric_type in data[cluster_type][equipment]:
-                    for metric_name in data[cluster_type][equipment][metric_type]:
-                        data[cluster_type][equipment][metric_type][metric_name] = str(data[cluster_type][equipment][metric_type][metric_name]) + tag_vdsk
+                data[cluster_type][equipment]['tags'] = tag_node + tag_mdsk + tag_vdsk
 
 
         # Empty stats in "old" field

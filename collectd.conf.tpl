@@ -16,6 +16,7 @@ LoadPlugin write_graphite
    AlwaysAppendDS false
    SeparateInstances true
    PreserveSeparator true
+   UseTags True
  </Carbon>
 </Plugin>
 
