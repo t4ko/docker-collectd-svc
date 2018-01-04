@@ -3,7 +3,7 @@ FROM ubuntu:16.04
 ENV DEBIAN_FRONTEND noninteractive 
 
 # Install all prerequisites for building collectd, paramiko and python plugin
-RUN apt-get -y update && apt-get -y install wget libssl-dev libffi-dev build-essential python3-dev python3-pip ssh tzdata git autoconf automake
+RUN apt-get -y update && apt-get -y install wget libssl-dev libffi-dev build-essential python3-dev python3-pip ssh tzdata git autoconf automake flex bison
 RUN pip3 install envtpl paramiko scp
 
 # Get and untar sources files 
@@ -16,9 +16,9 @@ RUN git reset --hard 09666a4a1d3511cbc6c4473f8946bd334a80d55b
 
 
 # Compile and purge source files 
-RUN automake
+RUN automake --add-missing
 RUN autoconf
-RUN ./configure && make all install
+RUN ./configure && make && make all install
 WORKDIR ..
 RUN rm -rf collectd-src
 #RUN cd collectd-5.7.2 && ./configure && make all install
