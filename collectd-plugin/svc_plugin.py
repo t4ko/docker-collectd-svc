@@ -839,7 +839,8 @@ class SVCPlugin(base.Base):
                 #Generate tags
                 tag_vdsk, tag_mdsk, tag_node = "", "", "";
                 if cluster_type == clustervdsk:
-                    tag_vdsk = ";vdisk_UID=" + vdiskList[equipment]["UID"] + ";IO_group_name=" + vdiskList[equipment]["iogrp"] + ";mdisk_grp_name=" + vdiskList[equipment]["mdiskGrpName"]
+                    #tag_vdsk = ";vdisk_UID=" + vdiskList[equipment]["UID"] + ";IO_group_name=" + vdiskList[equipment]["iogrp"] + ";mdisk_grp_name=" + vdiskList[equipment]["mdiskGrpName"]
+                    pass
                 # elif cluster_type == clustermdsk:
                 #     tag_mdsk = ";IO_group_name=" + mdiskList[equipment]["iogrp"]
                 # elif cluster_type == clusternode:

@@ -7,6 +7,11 @@ This collectd plugin work in a dockerized environment : one container is needed 
 This repository is linked to dockerhub to automatically compile the image corresponding to the last version available here.
 The image is available at https://hub.docker.com/r/t4ko/docker-collectd-svc/
 
+## Tags
+Additional data like IO_group_name or the mdisk_group_name are associated to metrics. 
+We use the tagging capability of Graphite 1.1+ which also allows querying with tags. 
+
+
 ## Running
 
 ```

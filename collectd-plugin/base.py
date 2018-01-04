@@ -94,9 +94,9 @@ class Base(object):
         try:
             for plugin in stats.keys():
                 for plugin_instance in stats[plugin].keys():
-                    if plugin_instance == "tags":
-                        continue
                     for type in stats[plugin][plugin_instance].keys():
+                        if type == "tags":
+                            continue
                         type_value = stats[plugin][plugin_instance][type]
                         if not isinstance(type_value, dict):
                             self.dispatch_value(plugin, plugin_instance, type, None, "", type_value)
@@ -121,7 +121,7 @@ class Base(object):
             val.type_instance=type_instance
         else:
             val.type_instance=type
-        val.type_instance=val.type_instance + tags #Add tags
+        val.type_instance= val.type_instance #Add tags
         val.values=[value]
         val.interval = self.interval
         val.dispatch(time=self.time) #passed time is UTC
