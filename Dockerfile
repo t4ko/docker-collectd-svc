@@ -15,7 +15,7 @@ RUN cd collectd-src && git reset --hard 09666a4a1d3511cbc6c4473f8946bd334a80d55b
 
 
 # Compile and purge source files 
-RUN ./configure && make all install
+RUN cd collectd-src && ./configure && make all install
 RUN cd .. && rm -rf collectd-src
 #RUN cd collectd-5.7.2 && ./configure && make all install
 #RUN cd .. && rm -rf collectd-5.7.2
