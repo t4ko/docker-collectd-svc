@@ -16,6 +16,8 @@ RUN git reset --hard 09666a4a1d3511cbc6c4473f8946bd334a80d55b
 
 
 # Compile and purge source files 
+RUN automake
+RUN autoconf
 RUN ./configure && make all install
 WORKDIR ..
 RUN rm -rf collectd-src
