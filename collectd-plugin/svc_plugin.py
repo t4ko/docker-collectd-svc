@@ -184,6 +184,7 @@ class SVCPlugin(base.Base):
                 if pattern.match(file):
                     self.logdebug("copying %s from %s" % (file, node))
                     (success, stdout, stderr) = self.check_command('cpdumps -prefix /dumps/iostats/%s %s' % (file, node))
+                    if not success: return
 
         # Load the timezone
         if self.timezone == None:
@@ -334,6 +335,23 @@ class SVCPlugin(base.Base):
                 self.catchup[self.time] = newTimeString
                 return
 
+        #Check if we have the necessary files
+        downloadedList = str(os.listdir(dumpsFolder))
+        for nodeId in nodeEncIdList:
+            #Parse the xml files
+            for statType in ['Nn', 'Nv', 'Nm']:
+                filename_new = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
+                filename_old = '{0}_stats_{1}_{2}'.format(statType, nodeId, oldTimeString)
+                if filename_new not in downloadedList:
+                    self.loginfo("Dump not downloaded, could not collect stats : {}".format(filename_new))
+                    self.catchup[self.time] = newTimeString
+                    return
+                if oldFileAvailable and not oldFileDownloaded:
+                    if filename_old not in downloadedList:
+                        self.loginfo("Dump not downloaded, could not collect stats : {}".format(filename_old))
+                        self.catchup[self.time] = newTimeString
+                        return
+
         # Load and parse previous files if they are available
         self.logverbose("Loading and parsing the old files")
         old_stats = defaultdict(dict)
@@ -402,10 +420,6 @@ class SVCPlugin(base.Base):
             #Parse the xml files
             for statType in ['Nn', 'Nv', 'Nm']:
                 filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
-                if filename not in downloadedList:
-                    self.loginfo("Dump not downloaded, could not collect stats : {}".format(filename))
-                    self.catchup[self.time] = newTimeString
-                    return
                 self.logdebug("Parsing dump file : {}".format(filename))
                 stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
             # Load relevant xml content in dict   

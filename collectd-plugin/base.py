@@ -121,7 +121,7 @@ class Base(object):
             val.type_instance=type_instance
         else:
             val.type_instance=type
-        val.type_instance= val.type_instance #Add tags
+        #val.type_instance= val.type_instance #Add tags
         val.values=[value]
         val.interval = self.interval
         val.dispatch(time=self.time) #passed time is UTC
@@ -131,8 +131,8 @@ class Base(object):
             self.mdisksStatsCount += 1
         elif "vdsk" in plugin:
             self.vdisksStatsCount +=1
-        # self.logdebug("sent metric %s.%s.%s.%s.%s"
-        #         % (plugin, plugin_instance, type, type_instance, value))
+        self.logdebug("sent metric %s.%s.%s.%s.%s"
+                % (plugin, plugin_instance, type, type_instance, value))
 
     def read_callback(self, timestamp = 0):
         self.forcedTime = timestamp
