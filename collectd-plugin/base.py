@@ -51,6 +51,7 @@ class Base(object):
         self.forcedTime = 0
         self.vdisksStatsCount = 0
         self.mdisksStatsCount = 0
+        self.portsStatsCount = 0
         self.nodesStatsCount = 0
 
     def config_callback(self, conf):
@@ -125,12 +126,15 @@ class Base(object):
         val.values=[value]
         val.interval = self.interval
         val.dispatch(time=self.time) #passed time is UTC
-        if "node" in plugin:
-            self.nodesStatsCount += 1
+        if "vdsk" in plugin:
+            self.vdisksStatsCount +=1
         elif "mdsk" in plugin:
             self.mdisksStatsCount += 1
-        elif "vdsk" in plugin:
-            self.vdisksStatsCount +=1
+        elif "port" in plugin:
+            self.portsStatsCount += 1
+        elif "node" in plugin:
+            self.nodesStatsCount += 1
+
         self.logdebug("sent metric %s.%s.%s.%s.%s"
                 % (plugin, plugin_instance, type, type_instance, value))
 
@@ -141,10 +145,11 @@ class Base(object):
             stats = self.get_stats()
             self.dispatch(stats)
             if stats is not None:
-                collectd.info("%s : Metrics collected : vdisks %d, mdisks %d, nodes %d : in %d sec"
-                        % (self.cluster, self.vdisksStatsCount, self.mdisksStatsCount, self.nodesStatsCount, int(time.time() - start)))
+                collectd.info("%s : Metrics collected : vdisks %d, mdisks %d, ports %d, nodes %d : in %d sec"
+                        % (self.cluster, self.vdisksStatsCount, self.mdisksStatsCount, self.portsStatsCount, self.nodesStatsCount, int(time.time() - start)))
             self.vdisksStatsCount = 0
             self.mdisksStatsCount = 0
+            self.portsStatsCount = 0
             self.nodesStatsCount = 0
         except Exception as exc:
             collectd.error("%s: failed to get stats :: %s :: %s"
