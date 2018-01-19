@@ -700,10 +700,9 @@ class SVCPlugin(base.Base):
                         'invalid_crc_rate': 0,
                         'invalid_word_rate': 0,
                         'link_failure_rate': 0,
-                        'psep_error_rate': 0,
+                        'pspe_error_rate': 0,
                         'signal_loss_rate': 0,
                         'sync_loss_rate': 0,
-                        'port_congestion_index': 0,
                         'zero_buffer_credit_percentage': 0
                     }
 
@@ -782,7 +781,7 @@ class SVCPlugin(base.Base):
                     port_data['link_failure_rate'] += port_new['lf'] - port_old['lf']
                     port_data['signal_loss_rate'] += port_new['lsi'] - port_old['lsi']
                     port_data['sync_loss_rate'] += port_new['lsy'] - port_old['lsy']
-                    port_data['psep_error_rate'] += port_new['pspe'] - port_old['pspe']
+                    port_data['pspe_error_rate'] += port_new['pspe'] - port_old['pspe']
 
             write_cache_delay_percentage, ctw, ctwft, ctwwt = 0, 0, 0, 0
             total_rrp, total_ro, total_wrp, total_wo = 0, 0, 0, 0
@@ -934,7 +933,7 @@ class SVCPlugin(base.Base):
             port_data['link_failure_rate'] = int(port_data['link_failure_rate'] / self.interval)
             port_data['signal_loss_rate'] = int(port_data['signal_loss_rate'] / self.interval)
             port_data['sync_loss_rate'] = int(port_data['sync_loss_rate'] / self.interval)
-            port_data['psep_error_rate'] = int(port_data['psep_error_rate'] / self.interval)
+            port_data['pspe_error_rate'] = int(port_data['pspe_error_rate'] / self.interval)
 
         for mdiskGrp in data[clustermdsk]: #mdisk
             mdisk_data = data[clustermdsk][mdiskGrp]['gauge']
