@@ -138,6 +138,7 @@ class SVCPlugin(base.Base):
         nodes_hash = {}
         config_node =''
         nodeEncIdList = []
+        nodeIdList = {}
         stdout = list(stdout)
         headers = stdout.pop(0)[:-1].split(':')
 
@@ -161,6 +162,7 @@ class SVCPlugin(base.Base):
             nodes_hash[node]['files'] = []
 
             nodeEncIdList.append(nodes_hash[node]['enclosure_id'])
+            nodeIdList[nodes_hash[node]['enclosure_id']] = nodes_hash[node]['name']
 
             for line in reversed(list(stdout)):
                 nodes_hash[node]['files'].append(line[:-1].split(':')[1])
@@ -379,7 +381,7 @@ class SVCPlugin(base.Base):
                     portType = port.get('type')
                     if portType == "FC":
                         allports.add(port)
-                        portId = port.get('id')
+                        portId = "%s_%s" % (nodeIdList[nodeId], port.get('id'))
                         self.dumps[nodeId]['ports'][portId] = {}
                         self.dumps[nodeId]['ports'][portId]['old'] = {
                             'bbcz' : int(port.get('bbcz')),
@@ -470,7 +472,7 @@ class SVCPlugin(base.Base):
                 portType = port.get('type')
                 if portType == "FC":
                     allports.add(port)
-                    portId = port.get('id')
+                    portId = "%s_%s" % (nodeIdList[nodeId], port.get('id'))
                     if portId not in self.dumps[nodeId]["ports"]:
                         self.dumps[nodeId]['ports'][portId] = {}
                     self.dumps[nodeId]['ports'][portId]['new'] = {
