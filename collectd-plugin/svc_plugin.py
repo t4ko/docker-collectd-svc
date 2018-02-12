@@ -134,6 +134,7 @@ class SVCPlugin(base.Base):
         self.logverbose("Loading the node list")
 
         (success, stdout, stderr) = self.check_command('lsnode -delim :')
+        if not success: return
 
         nodes_hash = {}
         config_node =''
@@ -158,6 +159,7 @@ class SVCPlugin(base.Base):
         for node in nodes_hash.keys():
 
             (success, stdout, stderr) = self.check_command('lsdumps -prefix /dumps/iostats/ -nohdr -delim : %s' % node)
+            if not success: return
 
             nodes_hash[node]['files'] = []
 
@@ -215,9 +217,9 @@ class SVCPlugin(base.Base):
             line = line.split(' N')[1]
             line = 'N{}'.format(line)
             self.logdebug(line)
-            statsType, junk, node, day, minute = line.split('_')
+            statType, junk, node, day, minute = line.split('_')
             timeString = "{0}_{1}".format(day, minute[:6])
-            lsdumpsList.add("{}_stats_{}_{}".format(statsType, node, timeString))
+            lsdumpsList.add("{}_stats_{}_{}".format(statType, node, timeString))
             epoch = time.mktime(time.strptime(timeString[:-2], "%y%m%d_%H%M"))
             if epoch in timestamps:
                 timestamps[epoch]['counter'] = timestamps[epoch]['counter'] + 1
@@ -359,84 +361,86 @@ class SVCPlugin(base.Base):
 
         # Load and parse previous files if they are available
         self.logverbose("Loading and parsing the old files")
-        old_stats = defaultdict(dict)
-        allvdisks, allmdisks, allports = set(), set(), set()
+        allvdisks, allmdisks = set(), set()
         if not (self.stats_history == self.time - self.interval):
             # Parse the xml files
             for filename in oldDumpsList :
                 self.logdebug("Parsing old dump file : {}".format(filename))
-                statType, junk1, panelId, junk2, junk3 = filename.split('_')
-                old_stats[panelId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
-            # Load relevant xml content in dict 
-            for nodeId in nodeEncIdList:
-                self.dumps[nodeId] = { 'nodes' : {}, 'ports': {}, 'mdisks' : {}, 'vdisks' : {}, 'sysid' : '' }
-                #Nodes
-                if nodeId not in self.dumps[nodeId][nodes] :
-                    self.dumps[nodeId][nodes] = { nodeId : {} }
-                self.dumps[nodeId][nodes][nodeId]['old'] = {
-                    'cpu' : int(old_stats[nodeId]['Nn'].find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy'))
-                }
-                #Ports
-                for port in old_stats[nodeId]['Nn'].findall('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}port'):
-                    portType = port.get('type')
-                    if portType == "FC":
-                        allports.add(port)
-                        portId = "%s_%s" % (nodeIdList[nodeId], port.get('id'))
-                        self.dumps[nodeId]['ports'][portId] = {}
-                        self.dumps[nodeId]['ports'][portId]['old'] = {
-                            'bbcz' : int(port.get('bbcz')),
-                            'cbr' : int(port.get('cbr')),
-                            'cbt' : int(port.get('cbt')),
-                            'cer' : int(port.get('cer')),
-                            'cet' : int(port.get('cet')),
-                            'hbr' : int(port.get('hbr')),
-                            'hbt' : int(port.get('hbt')),
-                            'her' : int(port.get('her')),
-                            'het' : int(port.get('het')),
-                            'icrc' : int(port.get('icrc')),
-                            'itw' : int(port.get('itw')),
-                            'lf' : int(port.get('lf')),
-                            'lnbr' : int(port.get('lnbr')),
-                            'lnbt' : int(port.get('lnbt')),
-                            'lner' : int(port.get('lner')),
-                            'lnet' : int(port.get('lnet')),
-                            'lsi' : int(port.get('lsi')),
-                            'lsy' : int(port.get('lsy')),
-                            'pspe' : int(port.get('pspe')),
-                            'rmbr' : int(port.get('rmbr')),
-                            'rmbt' : int(port.get('rmbt')),
-                            'rmer' : int(port.get('rmer')),
-                            'rmet' : int(port.get('rmet')),
-                        }
+                statType, junk1, nodeId, junk2, junk3 = filename.split('_')
+                dumpfile = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+                # Load relevant xml content in dict
+                if nodeId not in self.dumps: 
+                    self.dumps[nodeId] = { 'nodes' : {}, 'ports': {}, 'mdisks' : {}, 'vdisks' : {}, 'sysid' : '' }
+
+                if statType == "Nn":
+                    #Nodes
+                    if nodeId not in self.dumps[nodeId][nodes] :
+                        self.dumps[nodeId][nodes] = { nodeId : {} }
+                    self.dumps[nodeId][nodes][nodeId]['old'] = {
+                        'cpu' : int(dumpfile.find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy'))
+                    }
+                    #Ports
+                    for port in dumpfile.findall('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}port'):
+                        portType = port.get('type')
+                        if portType == "FC":
+                            portId = "%s_%s" % (nodeIdList[nodeId], port.get('id'))
+                            self.dumps[nodeId]['ports'][portId] = {}
+                            self.dumps[nodeId]['ports'][portId]['old'] = {
+                                'bbcz' : int(port.get('bbcz')),
+                                'cbr' : int(port.get('cbr')),
+                                'cbt' : int(port.get('cbt')),
+                                'cer' : int(port.get('cer')),
+                                'cet' : int(port.get('cet')),
+                                'hbr' : int(port.get('hbr')),
+                                'hbt' : int(port.get('hbt')),
+                                'her' : int(port.get('her')),
+                                'het' : int(port.get('het')),
+                                'icrc' : int(port.get('icrc')),
+                                'itw' : int(port.get('itw')),
+                                'lf' : int(port.get('lf')),
+                                'lnbr' : int(port.get('lnbr')),
+                                'lnbt' : int(port.get('lnbt')),
+                                'lner' : int(port.get('lner')),
+                                'lnet' : int(port.get('lnet')),
+                                'lsi' : int(port.get('lsi')),
+                                'lsy' : int(port.get('lsy')),
+                                'pspe' : int(port.get('pspe')),
+                                'rmbr' : int(port.get('rmbr')),
+                                'rmbt' : int(port.get('rmbt')),
+                                'rmer' : int(port.get('rmer')),
+                                'rmet' : int(port.get('rmet')),
+                            }
                 #Mdisks
-                for mdisk in old_stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'):
-                    mdiskId = mdisk.get('id')
-                    allmdisks.add(mdiskId)
-                    self.dumps[nodeId][mdisks][mdiskId] = {}
-                    self.dumps[nodeId][mdisks][mdiskId]['old'] = {
-                        'rb' : int(mdisk.get('rb')) * 512,
-                        'ro' : int(mdisk.get('ro')),
-                        'wb' : int(mdisk.get('wb')) * 512,
-                        'wo' : int(mdisk.get('wo')),
-                        're' : int(mdisk.get('re')),
-                        'we' : int(mdisk.get('we'))
-                    }
+                if statType == "Nm":
+                    for mdisk in dumpfile.findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'):
+                        mdiskId = mdisk.get('id')
+                        allmdisks.add(mdiskId)
+                        self.dumps[nodeId][mdisks][mdiskId] = {}
+                        self.dumps[nodeId][mdisks][mdiskId]['old'] = {
+                            'rb' : int(mdisk.get('rb')) * 512,
+                            'ro' : int(mdisk.get('ro')),
+                            'wb' : int(mdisk.get('wb')) * 512,
+                            'wo' : int(mdisk.get('wo')),
+                            're' : int(mdisk.get('re')),
+                            'we' : int(mdisk.get('we'))
+                        }
                 #Vdisks
-                for vdisk in old_stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'):
-                    vdiskId = vdisk.get('id')
-                    allvdisks.add(vdiskId)
-                    self.dumps[nodeId][vdisks][vdiskId] = {}
-                    self.dumps[nodeId][vdisks][vdiskId]['old'] = {
-                        'ctw' : int(vdisk.get('ctw')), 
-                        'ctwwt' : int(vdisk.get('ctwwt')), 
-                        'ctwft' : int(vdisk.get('ctwft')), 
-                        'rl' : int(vdisk.get('rl')),
-                        'wl' : int(vdisk.get('wl')),
-                        'rb' : int(vdisk.get('rb')) * 512,
-                        'wb' : int(vdisk.get('wb')) * 512, 
-                        'ro' : int(vdisk.get('ro')),
-                        'wo' : int(vdisk.get('wo'))
-                    }
+                if statType == "Nv":
+                    for vdisk in dumpfile.findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'):
+                        vdiskId = vdisk.get('id')
+                        allvdisks.add(vdiskId)
+                        self.dumps[nodeId][vdisks][vdiskId] = {}
+                        self.dumps[nodeId][vdisks][vdiskId]['old'] = {
+                            'ctw' : int(vdisk.get('ctw')), 
+                            'ctwwt' : int(vdisk.get('ctwwt')), 
+                            'ctwft' : int(vdisk.get('ctwft')), 
+                            'rl' : int(vdisk.get('rl')),
+                            'wl' : int(vdisk.get('wl')),
+                            'rb' : int(vdisk.get('rb')) * 512,
+                            'wb' : int(vdisk.get('wb')) * 512, 
+                            'ro' : int(vdisk.get('ro')),
+                            'wo' : int(vdisk.get('wo'))
+                        }
         else: #Transfer new to old, to avoid parsing a file that has already been parsed
             self.logverbose("Old files has already been parsed during previous collect")
             for nodeId in self.dumps:
@@ -449,7 +453,6 @@ class SVCPlugin(base.Base):
 
         # Load and parse the current files 
         self.logverbose("Loading and parsing the last files")
-        stats = defaultdict(dict)
         dumps = defaultdict(dict)
         downloadedList = str(os.listdir(dumpsFolder))
         self.logdebug("Stats dumps directory contains : \n{}".format(downloadedList))
@@ -458,85 +461,87 @@ class SVCPlugin(base.Base):
             for statType in ['Nn', 'Nv', 'Nm']:
                 filename = '{0}_stats_{1}_{2}'.format(statType, nodeId, newTimeString)
                 self.logdebug("Parsing dump file : {}".format(filename))
-                stats[nodeId][statType] = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
-            # Load relevant xml content in dict   
-            #Nodes
-            self.dumps[nodeId]['sysid'] = stats[nodeId]['Nn'].get('id')
-            if nodeId not in self.dumps[nodeId][nodes] :
-                self.dumps[nodeId][nodes][nodeId] = {}
-            self.dumps[nodeId]['nodes'][nodeId]['new'] = {
-                'cpu' : int(stats[nodeId]['Nn'].find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy'))
-            }
-            #Ports
-            for port in stats[nodeId]['Nn'].findall('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}port'):
-                portType = port.get('type')
-                if portType == "FC":
-                    allports.add(port)
-                    portId = "%s_%s" % (nodeIdList[nodeId], port.get('id'))
-                    if portId not in self.dumps[nodeId]["ports"]:
-                        self.dumps[nodeId]['ports'][portId] = {}
-                    self.dumps[nodeId]['ports'][portId]['new'] = {
-                        'bbcz' : int(port.get('bbcz')),
-                        'cbr' : int(port.get('cbr')),
-                        'cbt' : int(port.get('cbt')),
-                        'cer' : int(port.get('cer')),
-                        'cet' : int(port.get('cet')),
-                        'hbr' : int(port.get('hbr')),
-                        'hbt' : int(port.get('hbt')),
-                        'her' : int(port.get('her')),
-                        'het' : int(port.get('het')),
-                        'icrc' : int(port.get('icrc')),
-                        'itw' : int(port.get('itw')),
-                        'lf' : int(port.get('lf')),
-                        'lnbr' : int(port.get('lnbr')),
-                        'lnbt' : int(port.get('lnbt')),
-                        'lner' : int(port.get('lner')),
-                        'lnet' : int(port.get('lnet')),
-                        'lsi' : int(port.get('lsi')),
-                        'lsy' : int(port.get('lsy')),
-                        'pspe' : int(port.get('pspe')),
-                        'rmbr' : int(port.get('rmbr')),
-                        'rmbt' : int(port.get('rmbt')),
-                        'rmer' : int(port.get('rmer')),
-                        'rmet' : int(port.get('rmet')),
+                dumpfile = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
+                # Load relevant xml content in dict   
+                if statType == "Nn":
+                    #Nodes
+                    self.dumps[nodeId]['sysid'] = dumpfile.get('id')
+                    if nodeId not in self.dumps[nodeId][nodes] :
+                        self.dumps[nodeId][nodes][nodeId] = {}
+                    self.dumps[nodeId][nodes][nodeId]['new'] = {
+                        'cpu' : int(dumpfile.find('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}cpu').get('busy'))
                     }
-            #Mdisks
-            for mdisk in stats[nodeId]['Nm'].findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'):
-                mdiskId = mdisk.get('id')
-                allmdisks.add(mdiskId)
-                if mdiskId not in self.dumps[nodeId][mdisks]:
-                    self.dumps[nodeId][mdisks][mdiskId] = {}
-                self.dumps[nodeId][mdisks][mdisk.get('id')]['new'] = {
-                    'rb' : int(mdisk.get('rb')) * 512,
-                    'wb' : int(mdisk.get('wb')) * 512,
-                    'ro' : int(mdisk.get('ro')),
-                    'wo' : int(mdisk.get('wo')),
-                    're' : int(mdisk.get('re')),
-                    'we' : int(mdisk.get('we')),
-                    'pre' : int(mdisk.get('pre')) / 1000,
-                    'pwe' : int(mdisk.get('pwe')) / 1000
-                }
-            #Vdisks
-            for vdisk in stats[nodeId]['Nv'].findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'):
-                vdiskId = vdisk.get('id')
-                allvdisks.add(vdiskId)
-                if vdiskId not in self.dumps[nodeId][vdisks]:
-                    self.dumps[nodeId][vdisks][vdiskId] = {}
-                self.dumps[nodeId][vdisks][vdiskId]['new'] = {
-                    'ctw' : int(vdisk.get('ctw')), 
-                    'ctwwt' : int(vdisk.get('ctwwt')), 
-                    'ctwft' : int(vdisk.get('ctwft')), 
-                    'rl' : int(vdisk.get('rl')),
-                    'wl' : int(vdisk.get('wl')),
-                    'rlw' : int(vdisk.get('rlw')) / 1000,
-                    'wlw' : int(vdisk.get('wlw')) / 1000,
-                    'rb' : int(vdisk.get('rb')) * 512,
-                    'wb' : int(vdisk.get('wb')) * 512, 
-                    'ro' : int(vdisk.get('ro')),
-                    'wo' : int(vdisk.get('wo'))
-                }
+                    #Ports
+                    for port in dumpfile.findall('{http://ibm.com/storage/management/performance/api/2006/01/nodeStats}port'):
+                        portType = port.get('type')
+                        if portType == "FC":
+                            portId = "%s_%s" % (nodeIdList[nodeId], port.get('id'))
+                            if portId not in self.dumps[nodeId]["ports"]:
+                                self.dumps[nodeId]['ports'][portId] = {}
+                            self.dumps[nodeId]['ports'][portId]['new'] = {
+                                'bbcz' : int(port.get('bbcz')),
+                                'cbr' : int(port.get('cbr')),
+                                'cbt' : int(port.get('cbt')),
+                                'cer' : int(port.get('cer')),
+                                'cet' : int(port.get('cet')),
+                                'hbr' : int(port.get('hbr')),
+                                'hbt' : int(port.get('hbt')),
+                                'her' : int(port.get('her')),
+                                'het' : int(port.get('het')),
+                                'icrc' : int(port.get('icrc')),
+                                'itw' : int(port.get('itw')),
+                                'lf' : int(port.get('lf')),
+                                'lnbr' : int(port.get('lnbr')),
+                                'lnbt' : int(port.get('lnbt')),
+                                'lner' : int(port.get('lner')),
+                                'lnet' : int(port.get('lnet')),
+                                'lsi' : int(port.get('lsi')),
+                                'lsy' : int(port.get('lsy')),
+                                'pspe' : int(port.get('pspe')),
+                                'rmbr' : int(port.get('rmbr')),
+                                'rmbt' : int(port.get('rmbt')),
+                                'rmer' : int(port.get('rmer')),
+                                'rmet' : int(port.get('rmet')),
+                            }
+                #Mdisks
+                if statType == "Nm":
+                    for mdisk in dumpfile.findall('{http://ibm.com/storage/management/performance/api/2003/04/diskStats}mdsk'):
+                        mdiskId = mdisk.get('id')
+                        allmdisks.add(mdiskId)
+                        if mdiskId not in self.dumps[nodeId][mdisks]:
+                            self.dumps[nodeId][mdisks][mdiskId] = {}
+                        self.dumps[nodeId][mdisks][mdisk.get('id')]['new'] = {
+                            'rb' : int(mdisk.get('rb')) * 512,
+                            'wb' : int(mdisk.get('wb')) * 512,
+                            'ro' : int(mdisk.get('ro')),
+                            'wo' : int(mdisk.get('wo')),
+                            're' : int(mdisk.get('re')),
+                            'we' : int(mdisk.get('we')),
+                            'pre' : int(mdisk.get('pre')) / 1000,
+                            'pwe' : int(mdisk.get('pwe')) / 1000
+                        }
+                if statType == "Nv":
+                    #Vdisks
+                    for vdisk in dumpfile.findall('{http://ibm.com/storage/management/performance/api/2005/08/vDiskStats}vdsk'):
+                        vdiskId = vdisk.get('id')
+                        allvdisks.add(vdiskId)
+                        if vdiskId not in self.dumps[nodeId][vdisks]:
+                            self.dumps[nodeId][vdisks][vdiskId] = {}
+                        self.dumps[nodeId][vdisks][vdiskId]['new'] = {
+                            'ctw' : int(vdisk.get('ctw')), 
+                            'ctwwt' : int(vdisk.get('ctwwt')), 
+                            'ctwft' : int(vdisk.get('ctwft')), 
+                            'rl' : int(vdisk.get('rl')),
+                            'wl' : int(vdisk.get('wl')),
+                            'rlw' : int(vdisk.get('rlw')) / 1000,
+                            'wlw' : int(vdisk.get('wlw')) / 1000,
+                            'rb' : int(vdisk.get('rb')) * 512,
+                            'wb' : int(vdisk.get('wb')) * 512, 
+                            'ro' : int(vdisk.get('ro')),
+                            'wo' : int(vdisk.get('wo'))
+                        }
 
-            self.logdebug("{} has sysid {}".format(nodeId, self.dumps[nodeId]['sysid']))
+                self.logdebug("{} has sysid {}".format(nodeId, self.dumps[nodeId]['sysid']))
         self.logverbose("Finish loading and parsing new files")
         self.stats_history = self.time
 
