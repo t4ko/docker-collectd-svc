@@ -1,6 +1,4 @@
-FROM ubuntu:16.04
-
-ENV DEBIAN_FRONTEND noninteractive 
+FROM phusion/baseimage:latest
 
 # Install all prerequisites for building collectd, paramiko and python plugin
 RUN apt-get -y update && apt-get -y install wget libssl-dev libffi-dev build-essential python3-dev python3-pip ssh tzdata git autoconf automake flex bison libtool pkg-config
