@@ -112,8 +112,8 @@ class Base(object):
 
     def dispatch_value(self, plugin, plugin_instance, type, type_instance, tags, value):
         """Looks for the given stat in stats, and dispatches it"""
-        self.logdebug("dispatching value %s.%s.%s.%s%s=%s"
-                % (plugin, plugin_instance, type, type_instance, tags, value))
+        self.logdebug("dispatching value %s.%s.%s.%s%s %s %s"
+                % (plugin, plugin_instance, type, type_instance, tags, value, self.time))
 
         val = collectd.Values(type)
         val.plugin=plugin
@@ -122,21 +122,21 @@ class Base(object):
             val.type_instance=type_instance
         else:
             val.type_instance=type
-        #val.type_instance= val.type_instance #Add tags
+        val.type_instance=val.type_instance+tags #Add tags
         val.values=[value]
         val.interval = self.interval
-        val.dispatch(time=self.time) #passed time is UTC
-        if "vdsk" in plugin:
+        val.dispatch(time=self.time) #passed time is UTC 
+        if ".vdsk" in plugin:
             self.vdisksStatsCount +=1
-        elif "mdsk" in plugin:
+        elif ".mdsk" in plugin:
             self.mdisksStatsCount += 1
-        elif "port" in plugin:
+        elif ".port" in plugin:
             self.portsStatsCount += 1
-        elif "node" in plugin:
+        elif ".node" in plugin:
             self.nodesStatsCount += 1
 
-        self.logdebug("sent metric %s.%s.%s.%s.%s"
-                % (plugin, plugin_instance, type, type_instance, value))
+        self.logdebug("Sent metric dispatching value %s.%s.%s.%s%s %s %s"
+                % (plugin, plugin_instance, type, type_instance, tags, value, self.time))
 
     def read_callback(self, timestamp = 0):
         self.forcedTime = timestamp

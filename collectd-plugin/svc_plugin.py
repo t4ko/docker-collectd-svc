@@ -1002,16 +1002,31 @@ class SVCPlugin(base.Base):
         # WIP : Add tags to metrics (mdisk group, io group)
         for cluster_type in data:
             for equipment in data[cluster_type]:
-                #Generate tags
-                tag_vdsk, tag_mdsk, tag_node = "", "", "";
+                #Generate additional tags
+                tag_vdsk, tag_port, tag_mdsk, tag_node = "", "", "", "";
                 if cluster_type == clustervdsk:
-                    #tag_vdsk = ";vdisk_UID=" + vdiskList[equipment]["UID"] + ";IO_group_name=" + vdiskList[equipment]["iogrp"] + ";mdisk_grp_name=" + vdiskList[equipment]["mdiskGrpName"]
-                    pass
-                # elif cluster_type == clustermdsk:
-                #     tag_mdsk = ";IO_group_name=" + mdiskList[equipment]["iogrp"]
-                # elif cluster_type == clusternode: 
-                #     pass #No tag implemented for the moment
-                data[cluster_type][equipment]['tags'] = tag_node + tag_mdsk + tag_vdsk
+                    tag_vdsk = ";equipment_type=vdisk;UID=%s;IO_grp_name=%s;mdisk_grp_name=%s;cluster=%s" % (
+                        vdiskList[equipment]["UID"], 
+                        vdiskList[equipment]["iogrp"], 
+                        vdiskList[equipment]["mdiskGrpName"], 
+                        svc_cluster
+                    )
+                elif cluster_type == clusterport:
+                    splitted_port = equipment.split('_')
+                    tag_port = ";equipment_type=port;node=%s;port_number=%s;cluster=%s" % (
+                        splitted_port[0], 
+                        splitted_port[1], 
+                        svc_cluster
+                    )
+                elif cluster_type == clustermdsk:
+                    tag_mdsk = ";equipment_type=mdisk;cluster=%s" % (
+                        svc_cluster
+                )
+                elif cluster_type == clusternode:
+                    tag_node = ";equipment_type=node;cluster=%s" % (
+                        svc_cluster
+                    )
+                data[cluster_type][equipment]['tags'] = "%s%s%s%s" % (tag_node, tag_mdsk, tag_port, tag_vdsk)
 
 
         # Empty stats in "old" field
