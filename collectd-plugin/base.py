@@ -126,9 +126,9 @@ class Base(object):
         val.values=[value]
         val.interval = self.interval
         val.dispatch(time=self.time) #passed time is UTC 
-        if ".vdsk" in plugin:
+        if ".vdisk" in plugin:
             self.vdisksStatsCount +=1
-        elif ".mdsk" in plugin:
+        elif ".mdiskgrp" in plugin:
             self.mdisksStatsCount += 1
         elif ".port" in plugin:
             self.portsStatsCount += 1
@@ -145,7 +145,7 @@ class Base(object):
             stats = self.get_stats()
             self.dispatch(stats)
             if stats is not None:
-                collectd.info("%s : Metrics collected : vdisks %d, mdisks %d, ports %d, nodes %d : in %d sec"
+                collectd.info("%s : Metrics collected : vdisks %d, mdiskgroups %d, ports %d, nodes %d : in %d sec"
                         % (self.cluster, self.vdisksStatsCount, self.mdisksStatsCount, self.portsStatsCount, self.nodesStatsCount, int(time.time() - start)))
             self.vdisksStatsCount = 0
             self.mdisksStatsCount = 0

@@ -112,10 +112,10 @@ class SVCPlugin(base.Base):
 
         svc_cluster = self.cluster # Defines the name of the current svc cluster (provided in the conf)
         clusternode = "{}.node".format(svc_cluster)
-        clustermdsk = "{}.mdsk".format(svc_cluster)
-        clustervdsk = "{}.vdsk".format(svc_cluster)
+        clustermdskgrp = "{}.mdiskgrp".format(svc_cluster)
+        clustervdsk = "{}.vdisk".format(svc_cluster)
         clusterport = "{}.port".format(svc_cluster)
-        vdisks, mdisks, nodes = 'vdisks', 'mdisks', 'nodes'
+        vdisks, mdisks, nodes, ports = 'vdisks', 'mdisks', 'nodes', 'ports'
 
         # Close previous ssh connections if still alive
         if self.ssh is not None and self.forcedTime == 0:
@@ -370,7 +370,7 @@ class SVCPlugin(base.Base):
                 dumpfile = ET.parse('{0}/{1}'.format(dumpsFolder, filename)).getroot()
                 # Load relevant xml content in dict
                 if nodeId not in self.dumps: 
-                    self.dumps[nodeId] = { 'nodes' : {}, 'ports': {}, 'mdisks' : {}, 'vdisks' : {}, 'sysid' : '' }
+                    self.dumps[nodeId] = { nodes : {}, ports: {}, mdisks : {}, vdisks : {}, 'sysid' : '' }
 
                 if statType == "Nn":
                     #Nodes
@@ -603,7 +603,7 @@ class SVCPlugin(base.Base):
             splitted = line.split(':')
             if isFirst:
                 isFirst = False
-                nameIndex, mdisk_grp_nameIndex, iogrp_nameIndex, uidIndex = splitted.index('name'), splitted.index('mdisk_grp_name'), splitted.index('IO_group_name'), splitted.index('vdisk_UID')
+                nameIndex, mdisk_grp_nameIndex, iogrp_nameIndex = splitted.index('name'), splitted.index('mdisk_grp_name'), splitted.index('IO_group_name')
                 continue
             if nameIndex == -1 or mdisk_grp_nameIndex == -1 or iogrp_nameIndex == -1:
                 self.loginfo('The first line of the output for \'lsvdisk -delim :\' is missing \'name\' or \'mdisk_grp_name\'')
@@ -613,14 +613,12 @@ class SVCPlugin(base.Base):
             vdiskList[splitted[nameIndex]] = { 
                 'mdiskGrpName' : '',
                 'iogrp': '',
-                'UID' : '',
                 'ro' : 0, 
                 'wo' : 0, 
                 'rrp' : 0, 
                 'wrp' : 0 
             }
             vdiskList[splitted[nameIndex]]['iogrp'] = splitted[iogrp_nameIndex]
-            vdiskList[splitted[nameIndex]]['UID'] = splitted[uidIndex]
             if splitted[mdisk_grp_nameIndex] == 'many': # the vdisk is in several mdisk groups
                 manyMdiskgrp.add(splitted[nameIndex])
             else: # the vdisk is in a single mdisk group
@@ -657,7 +655,7 @@ class SVCPlugin(base.Base):
         self.logverbose("Initializing data structures")
 
         ## Metrics for SVC nodes
-        data = { clusternode : {}, clusterport : {}, clustervdsk : {}, clustermdsk : {} }
+        data = { clusternode : {}, clusterport : {}, clustervdsk : {}, clustermdskgrp : {} }
 
         # Initialize the structure to store nodes data
         for nodeId in nodeEncIdList:
@@ -715,8 +713,8 @@ class SVCPlugin(base.Base):
 
         # Initialize the structure to store mdisks data
         for mdisk in mdiskList:
-            data[clustermdsk][mdiskList[mdisk]['mdiskGrpName']] = { 'gauge' : {} }
-            data[clustermdsk][mdiskList[mdisk]['mdiskGrpName']]['gauge'] = {
+            data[clustermdskgrp][mdiskList[mdisk]['mdiskGrpName']] = { 'gauge' : {} }
+            data[clustermdskgrp][mdiskList[mdisk]['mdiskGrpName']]['gauge'] = {
                 'backend_read_response_time' : 0,
                 'backend_write_response_time' : 0,
                 'read_response_time' : 0,
@@ -797,7 +795,7 @@ class SVCPlugin(base.Base):
                     mdiskGrp = vdiskList[vdisk]['mdiskGrpName']
                     if len(self.dumps[nodeId][vdisks][vdisk]) == 2:
                         vdisk_old, vdisk_new = self.dumps[nodeId][vdisks][vdisk]['old'], self.dumps[nodeId][vdisks][vdisk]['new']  # Faster access
-                        mdisk_data, vdisk_data = data[clustermdsk][mdiskGrp]['gauge'], data[clustervdsk][vdisk]['gauge']
+                        mdisk_data, vdisk_data = data[clustermdskgrp][mdiskGrp]['gauge'], data[clustervdsk][vdisk]['gauge']
 
                         total_ro += vdisk_new['ro'] - vdisk_old['ro']
                         total_wo += vdisk_new['wo'] - vdisk_old['wo']
@@ -862,7 +860,7 @@ class SVCPlugin(base.Base):
                 if mdisk in mdiskList:
                     if len(self.dumps[nodeId][mdisks][mdisk]) == 2:
                         mdisk_old, mdisk_new = self.dumps[nodeId][mdisks][mdisk]['old'], self.dumps[nodeId][mdisks][mdisk]['new']  # Faster access
-                        mdisk_data = data[clustermdsk][mdiskGrp]['gauge']
+                        mdisk_data = data[clustermdskgrp][mdiskGrp]['gauge']
                         mdiskGrp = mdiskList[mdisk]['mdiskGrpName']
                         #node
                         node_data['backend_read_data_rate'] += mdisk_new['rb'] - mdisk_old['rb']
@@ -942,8 +940,8 @@ class SVCPlugin(base.Base):
             port_data['sync_loss_rate'] = int(port_data['sync_loss_rate'] / self.interval)
             port_data['pspe_error_rate'] = int(port_data['pspe_error_rate'] / self.interval)
 
-        for mdiskGrp in data[clustermdsk]: #mdisk
-            mdisk_data = data[clustermdsk][mdiskGrp]['gauge']
+        for mdiskGrp in data[clustermdskgrp]: #mdisk
+            mdisk_data = data[clustermdskgrp][mdiskGrp]['gauge']
             mdisk_data['backend_read_data_rate'] = int( mdisk_data['backend_read_data_rate'] / self.interval)
             mdisk_data['backend_read_io_rate'] = int( mdisk_data['backend_read_io_rate'] / self.interval)
             mdisk_data['backend_write_data_rate'] = int( mdisk_data['backend_write_data_rate'] / self.interval)
@@ -985,15 +983,15 @@ class SVCPlugin(base.Base):
         # Backend latency
         for mdiskGrp in mdiskGrpList:
             if mdiskGrpList[mdiskGrp]['b_ro'] != 0: #avoid division by 0
-                data[clustermdsk][mdiskGrp]['gauge']['backend_read_response_time'] += float(mdiskGrpList[mdiskGrp]['b_rrp']/mdiskGrpList[mdiskGrp]['b_ro'])
+                data[clustermdskgrp][mdiskGrp]['gauge']['backend_read_response_time'] += float(mdiskGrpList[mdiskGrp]['b_rrp']/mdiskGrpList[mdiskGrp]['b_ro'])
             if mdiskGrpList[mdiskGrp]['b_wo'] != 0: #avoid division by 0
-                data[clustermdsk][mdiskGrp]['gauge']['backend_write_response_time'] += float(mdiskGrpList[mdiskGrp]['b_wrp']/mdiskGrpList[mdiskGrp]['b_wo'])
+                data[clustermdskgrp][mdiskGrp]['gauge']['backend_write_response_time'] += float(mdiskGrpList[mdiskGrp]['b_wrp']/mdiskGrpList[mdiskGrp]['b_wo'])
 
         # Frontend latency
             if mdiskGrpList[mdiskGrp]['ro'] != 0: #avoid division by 0
-                data[clustermdsk][mdiskGrp]['gauge']['read_response_time'] += float(mdiskGrpList[mdiskGrp]['rrp']/mdiskGrpList[mdiskGrp]['ro'])
+                data[clustermdskgrp][mdiskGrp]['gauge']['read_response_time'] += float(mdiskGrpList[mdiskGrp]['rrp']/mdiskGrpList[mdiskGrp]['ro'])
             if mdiskGrpList[mdiskGrp]['wo'] != 0: #avoid division by 0
-                data[clustermdsk][mdiskGrp]['gauge']['write_response_time'] += float(mdiskGrpList[mdiskGrp]['wrp']/mdiskGrpList[mdiskGrp]['wo'])
+                data[clustermdskgrp][mdiskGrp]['gauge']['write_response_time'] += float(mdiskGrpList[mdiskGrp]['wrp']/mdiskGrpList[mdiskGrp]['wo'])
 
         # Set the value to 0 when the counter decrease
         self.logdebug("Changing negative values to 0")
@@ -1010,8 +1008,7 @@ class SVCPlugin(base.Base):
                 #Generate additional tags
                 tag_vdsk, tag_port, tag_mdsk, tag_node = "", "", "", "";
                 if cluster_type == clustervdsk:
-                    tag_vdsk = ";equipment_type=vdisk;UID=%s;IO_grp_name=%s;mdisk_grp_name=%s;cluster=%s" % (
-                        vdiskList[equipment]["UID"], 
+                    tag_vdsk = ";equipment_type=vdisk;IO_grp_name=%s;mdisk_grp_name=%s;cluster=%s" % (
                         vdiskList[equipment]["iogrp"], 
                         vdiskList[equipment]["mdiskGrpName"], 
                         svc_cluster
@@ -1023,8 +1020,8 @@ class SVCPlugin(base.Base):
                         splitted_port[1], 
                         svc_cluster
                     )
-                elif cluster_type == clustermdsk:
-                    tag_mdsk = ";equipment_type=mdisk;cluster=%s" % (
+                elif cluster_type == clustermdskgrp:
+                    tag_mdsk = ";equipment_type=mdiskgrp;cluster=%s" % (
                         svc_cluster
                 )
                 elif cluster_type == clusternode:
