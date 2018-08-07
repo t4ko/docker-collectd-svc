@@ -2,9 +2,6 @@
 This is a collectd plugin developped to collect, calculate and store relevant data to monitor IBM SVC clusters.
 The plugin is written with python and we use the write_graphite plugin to store collected data.
 
-## Work In Progress
-- Adapting the collect to use the tagging ability of Graphite 1.1+ to add information to the metrics
-
 ## Docker
 This collectd plugin work in a dockerized environment : one container is needed for each cluster there is to monitor.
 This repository is linked to dockerhub to automatically compile the image corresponding to the last version available here.
