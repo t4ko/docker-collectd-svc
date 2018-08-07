@@ -795,7 +795,7 @@ class SVCPlugin(base.Base):
                     mdiskGrp = vdiskList[vdisk]['mdiskGrpName']
                     if len(self.dumps[nodeId][vdisks][vdisk]) == 2:
                         vdisk_old, vdisk_new = self.dumps[nodeId][vdisks][vdisk]['old'], self.dumps[nodeId][vdisks][vdisk]['new']  # Faster access
-                        mdisk_data, vdisk_data = data[clustermdskgrp][mdiskGrp]['gauge'], data[clustervdsk][vdisk]['gauge']
+                        mdg_data, vdisk_data = data[clustermdskgrp][mdiskGrp]['gauge'], data[clustervdsk][vdisk]['gauge']
 
                         total_ro += vdisk_new['ro'] - vdisk_old['ro']
                         total_wo += vdisk_new['wo'] - vdisk_old['wo']
@@ -813,14 +813,14 @@ class SVCPlugin(base.Base):
                         if node_data['peak_write_response_time'] < vdisk_new['wlw']:
                             node_data['peak_write_response_time'] = vdisk_new['wlw']
                         #mdisk
-                        mdisk_data['read_data_rate'] += vdisk_new['rb'] - vdisk_old['rb']
-                        mdisk_data['read_io_rate'] += vdisk_new['ro'] - vdisk_old['ro']
-                        mdisk_data['write_data_rate'] += vdisk_new['wb'] - vdisk_old['wb']
-                        mdisk_data['write_io_rate'] += vdisk_new['wo'] - vdisk_old['wo']
-                        if mdisk_data['peak_read_response_time'] < vdisk_new['rlw']:
-                            mdisk_data['peak_read_response_time'] = vdisk_new['rlw']
-                        if mdisk_data['peak_write_response_time'] < vdisk_new['wlw']:
-                            mdisk_data['peak_write_response_time'] = vdisk_new['wlw']
+                        mdg_data['read_data_rate'] += vdisk_new['rb'] - vdisk_old['rb']
+                        mdg_data['read_io_rate'] += vdisk_new['ro'] - vdisk_old['ro']
+                        mdg_data['write_data_rate'] += vdisk_new['wb'] - vdisk_old['wb']
+                        mdg_data['write_io_rate'] += vdisk_new['wo'] - vdisk_old['wo']
+                        if mdg_data['peak_read_response_time'] < vdisk_new['rlw']:
+                            mdg_data['peak_read_response_time'] = vdisk_new['rlw']
+                        if mdg_data['peak_write_response_time'] < vdisk_new['wlw']:
+                            mdg_data['peak_write_response_time'] = vdisk_new['wlw']
                         #vdisk
                         vdisk_data['read_data_rate'] += vdisk_new['rb'] - vdisk_old['rb']
                         vdisk_data['read_io_rate'] += vdisk_new['ro'] - vdisk_old['ro']
@@ -859,9 +859,9 @@ class SVCPlugin(base.Base):
             for mdisk in self.dumps[nodeId][mdisks]:
                 if mdisk in mdiskList:
                     if len(self.dumps[nodeId][mdisks][mdisk]) == 2:
-                        mdisk_old, mdisk_new = self.dumps[nodeId][mdisks][mdisk]['old'], self.dumps[nodeId][mdisks][mdisk]['new']  # Faster access
-                        mdisk_data = data[clustermdskgrp][mdiskGrp]['gauge']
                         mdiskGrp = mdiskList[mdisk]['mdiskGrpName']
+                        mdisk_old, mdisk_new = self.dumps[nodeId][mdisks][mdisk]['old'], self.dumps[nodeId][mdisks][mdisk]['new']  # Faster access
+                        mdg_data = data[clustermdskgrp][mdiskGrp]['gauge']
                         #node
                         node_data['backend_read_data_rate'] += mdisk_new['rb'] - mdisk_old['rb']
                         node_data['backend_read_io_rate'] += mdisk_new['ro'] - mdisk_old['ro']
@@ -872,14 +872,14 @@ class SVCPlugin(base.Base):
                         if node_data['peak_backend_write_response_time'] < mdisk_new['pwe']:
                             node_data['peak_backend_write_response_time'] = mdisk_new['pwe']
                         #mdisk
-                        mdisk_data['backend_read_data_rate'] += mdisk_new['rb'] - mdisk_old['rb']
-                        mdisk_data['backend_read_io_rate'] += mdisk_new['ro'] - mdisk_old['ro']
-                        mdisk_data['backend_write_data_rate'] += mdisk_new['wb'] - mdisk_old['wb']
-                        mdisk_data['backend_write_io_rate'] += mdisk_new['wo'] - mdisk_old['wo']
-                        if mdisk_data['peak_backend_read_response_time'] < mdisk_new['pre']:
-                            mdisk_data['peak_backend_read_response_time'] = mdisk_new['pre']
-                        if mdisk_data['peak_backend_write_response_time'] < mdisk_new['pwe']:
-                            mdisk_data['peak_backend_write_response_time'] = mdisk_new['pwe']
+                        mdg_data['backend_read_data_rate'] += mdisk_new['rb'] - mdisk_old['rb']
+                        mdg_data['backend_read_io_rate'] += mdisk_new['ro'] - mdisk_old['ro']
+                        mdg_data['backend_write_data_rate'] += mdisk_new['wb'] - mdisk_old['wb']
+                        mdg_data['backend_write_io_rate'] += mdisk_new['wo'] - mdisk_old['wo']
+                        if mdg_data['peak_backend_read_response_time'] < mdisk_new['pre']:
+                            mdg_data['peak_backend_read_response_time'] = mdisk_new['pre']
+                        if mdg_data['peak_backend_write_response_time'] < mdisk_new['pwe']:
+                            mdg_data['peak_backend_write_response_time'] = mdisk_new['pwe']
                         #Response time
                         total_ro += mdisk_new['ro'] - mdisk_old['ro']
                         total_wo += mdisk_new['wo'] - mdisk_old['wo']
@@ -940,18 +940,18 @@ class SVCPlugin(base.Base):
             port_data['sync_loss_rate'] = int(port_data['sync_loss_rate'] / self.interval)
             port_data['pspe_error_rate'] = int(port_data['pspe_error_rate'] / self.interval)
 
-        for mdiskGrp in data[clustermdskgrp]: #mdisk
-            mdisk_data = data[clustermdskgrp][mdiskGrp]['gauge']
-            mdisk_data['backend_read_data_rate'] = int( mdisk_data['backend_read_data_rate'] / self.interval)
-            mdisk_data['backend_read_io_rate'] = int( mdisk_data['backend_read_io_rate'] / self.interval)
-            mdisk_data['backend_write_data_rate'] = int( mdisk_data['backend_write_data_rate'] / self.interval)
-            mdisk_data['backend_write_io_rate'] = int( mdisk_data['backend_write_io_rate'] / self.interval)
-            mdisk_data['read_data_rate'] = int(mdisk_data['read_data_rate'] / self.interval)
-            mdisk_data['read_io_rate'] = int(mdisk_data['read_io_rate'] / self.interval)
-            mdisk_data['write_data_rate'] = int(mdisk_data['write_data_rate'] / self.interval)
-            mdisk_data['write_io_rate'] = int(mdisk_data['write_io_rate'] / self.interval)
+        for mdiskGrp in data[clustermdskgrp]: # mdiskgroups
+            mdg_data = data[clustermdskgrp][mdiskGrp]['gauge']
+            mdg_data['backend_read_data_rate'] = int( mdg_data['backend_read_data_rate'] / self.interval)
+            mdg_data['backend_read_io_rate'] = int( mdg_data['backend_read_io_rate'] / self.interval)
+            mdg_data['backend_write_data_rate'] = int( mdg_data['backend_write_data_rate'] / self.interval)
+            mdg_data['backend_write_io_rate'] = int( mdg_data['backend_write_io_rate'] / self.interval)
+            mdg_data['read_data_rate'] = int(mdg_data['read_data_rate'] / self.interval)
+            mdg_data['read_io_rate'] = int(mdg_data['read_io_rate'] / self.interval)
+            mdg_data['write_data_rate'] = int(mdg_data['write_data_rate'] / self.interval)
+            mdg_data['write_io_rate'] = int(mdg_data['write_io_rate'] / self.interval)
 
-        for vdiskId in data[clustervdsk]: #vdisk
+        for vdiskId in data[clustervdsk]: # vdisk
             data[clustervdsk][vdiskId]['gauge']['read_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_data_rate'] / self.interval)
             data[clustervdsk][vdiskId]['gauge']['write_data_rate'] = int(data[clustervdsk][vdiskId]['gauge']['write_data_rate'] / self.interval)
             data[clustervdsk][vdiskId]['gauge']['read_io_rate'] = int(data[clustervdsk][vdiskId]['gauge']['read_io_rate'] / self.interval)
