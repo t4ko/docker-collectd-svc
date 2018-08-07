@@ -4,14 +4,12 @@ FROM phusion/baseimage:latest
 RUN apt-get -y update && apt-get -y install wget libssl-dev libffi-dev build-essential python3-dev python3-pip ssh tzdata git autoconf automake flex bison libtool pkg-config
 RUN pip3 install envtpl paramiko scp
 
-# Get and untar sources files 
+# Download and untar sources files 
 #RUN wget https://collectd.org/files/collectd-5.7.2.tar.bz2
 #RUN tar jxvf collectd-5.7.2.tar.bz2 && rm collectd-5.7.2.tar.bz2
 #Use git until the pull request for tags in write_graphite plugin is merged
 WORKDIR collectd-src
-RUN git clone https://github.com/DanCech/collectd.git -b tagged-carbon .
-RUN git reset --hard 09666a4a1d3511cbc6c4473f8946bd334a80d55b
-
+RUN git clone https://github.com/collectd/collectd.git .
 
 # Compile and purge source files 
 RUN ./build.sh
